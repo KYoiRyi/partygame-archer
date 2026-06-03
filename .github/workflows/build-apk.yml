@@ -1,0 +1,60 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
+      - name: Generate Debug Keystore
+        run: |
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore client/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 9999
+
+      - name: Download Godot Headless
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip -O godot.zip
+          unzip godot.zip
+          mv Godot_v4.3-stable_linux.x86_64 godot
+          chmod +x godot
+          rm godot.zip
+
+      - name: Download Godot Export Templates
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz -O templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/4.3.stable
+          # Extract only Android templates to speed up the run
+          unzip -j templates.tpz "templates/android_debug.apk" "templates/android_release.apk" -d ~/.local/share/godot/export_templates/4.3.stable/
+          rm templates.tpz
+
+      - name: Export APK
+        run: |
+          mkdir -p dist
+          ./godot --headless --path client --export-debug "Android" ../dist/archer.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Archer-MOBA-Android-APK
+          path: dist/archer.apk
+          if-no-files-found: error
