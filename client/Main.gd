@@ -3,6 +3,8 @@ extends Node2D
 # --- Networking ---
 var socket: WebSocketPeer = WebSocketPeer.new()
 var is_connected: bool = false
+var is_connecting: bool = false
+var connection_timeout_timer: float = 0.0
 var client_id: String = ""
 var my_team: String = ""
 
@@ -51,7 +53,7 @@ var system_font: Font = null
 var smooth_positions: Dictionary = {}
 
 func _ready():
-	system_font = $UI/HUD/TopPanel/Stats.get_theme_font("font")
+	system_font = ThemeDB.fallback_font
 	
 	# Automatically hide the ServerInput LineEdit to avoid UI confusion
 	$UI/Lobby/Panel/VBox/ServerInput.visible = false
@@ -59,6 +61,9 @@ func _ready():
 	# 1. Connect UI Signals
 	$UI/Lobby/Panel/VBox/JoinButton.pressed.connect(_on_join_pressed)
 	$UI/HUD/ChatBox/ChatInput.text_submitted.connect(_on_chat_submitted)
+	
+	# Connect name input focus_entered for mobile virtual keyboard trigger
+	$UI/Lobby/Panel/VBox/NameInput.focus_entered.connect(_on_name_input_focus_entered)
 	
 	# Connect skill choices buttons
 	$UI/SkillPanel/VBox/Choices/Choice1.pressed.connect(func(): _on_skill_chosen(0))
@@ -79,11 +84,33 @@ func _ready():
 	# Initial window setup
 	get_viewport().files_dropped.connect(func(files): pass)
 
+func _on_name_input_focus_entered():
+	if OS.has_feature("web"):
+		# Release focus immediately to avoid repeating prompt triggers
+		$UI/Lobby/Panel/VBox/NameInput.release_focus()
+		var current_text = $UI/Lobby/Panel/VBox/NameInput.text
+		var input = JavaScriptBridge.eval("prompt('请输入你的游戏昵称 (Enter your nickname):', '" + current_text.replace("'", "\\'") + "')")
+		if input != null:
+			var name_str = str(input).strip_edges()
+			if name_str != "":
+				$UI/Lobby/Panel/VBox/NameInput.text = name_str
+
 func _on_join_pressed():
+	if is_connecting or is_connected:
+		return
+		
 	var nickname = $UI/Lobby/Panel/VBox/NameInput.text.strip_edges()
 	if nickname == "":
-		nickname = "Archer" + str(randi() % 1000)
-		
+		if OS.has_feature("web"):
+			var input = JavaScriptBridge.eval("prompt('请输入你的游戏昵称 (Enter your nickname):', '')")
+			if input != null and str(input).strip_edges() != "":
+				nickname = str(input).strip_edges()
+				$UI/Lobby/Panel/VBox/NameInput.text = nickname
+			else:
+				nickname = "Archer" + str(randi() % 1000)
+		else:
+			nickname = "Archer" + str(randi() % 1000)
+			
 	var server_url = "ws://prts.kyoiryi.top/archer/ws" # Default production target
 	if OS.has_feature("web"):
 		var host = JavaScriptBridge.eval("window.location.host")
@@ -104,6 +131,13 @@ func _on_join_pressed():
 	var ws_url = server_url + "?name=" + nickname.uri_encode()
 	
 	add_chat_message("System", "Connecting to " + ws_url + "...")
+	
+	# Start connection state tracking
+	is_connecting = true
+	connection_timeout_timer = 5.0
+	$UI/Lobby/Panel/VBox/JoinButton.disabled = true
+	$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECTING..."
+	
 	socket.connect_to_url(ws_url)
 
 func _process(delta):
@@ -114,6 +148,9 @@ func _process(delta):
 	if state == WebSocketPeer.STATE_OPEN:
 		if not is_connected:
 			is_connected = true
+			is_connecting = false
+			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
+			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
 			$UI/Lobby.visible = false
 			$UI/HUD.visible = true
 			add_chat_message("System", "Successfully connected!")
@@ -140,6 +177,25 @@ func _process(delta):
 			$UI/HUD.visible = false
 			$UI/SkillPanel.visible = false
 			add_chat_message("System", "Disconnected from server.")
+		elif is_connecting:
+			is_connecting = false
+			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
+			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
+			add_chat_message("System", "Connection failed! Server might be offline.")
+			if OS.has_feature("web"):
+				JavaScriptBridge.eval("alert('无法连接到服务器，请检查网络或确认服务器已运行。 (Failed to connect to server. Ensure it is running.)')")
+				
+	# Handle connection timeout
+	if is_connecting:
+		connection_timeout_timer -= delta
+		if connection_timeout_timer <= 0:
+			socket.close()
+			is_connecting = false
+			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
+			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
+			add_chat_message("System", "Connection timed out.")
+			if OS.has_feature("web"):
+				JavaScriptBridge.eval("alert('连接超时，请确认服务器正常工作。 (Connection timed out.)')")
 	
 	# Interpolate active entities for buttery-smooth movements
 	_update_smooth_positions(delta)
