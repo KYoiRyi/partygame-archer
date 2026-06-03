@@ -70,8 +70,13 @@ var smooth_positions: Dictionary = {}
 func _ready():
 	system_font = ThemeDB.fallback_font
 	
-	# Automatically hide the ServerInput LineEdit to avoid UI confusion
-	$UI/Lobby/Panel/VBox/ServerInput.visible = false
+	# Show ServerInput on non-web platforms (like APK/Desktop) so users can edit the server URL,
+	# but hide it on Web since it resolves automatically.
+	if OS.has_feature("web"):
+		$UI/Lobby/Panel/VBox/ServerInput.visible = false
+	else:
+		$UI/Lobby/Panel/VBox/ServerInput.visible = true
+		$UI/Lobby/Panel/VBox/ServerInput.text = "wss://prts.kyoiryi.top/archer/ws"
 	
 	# Dynamic OptionButton for Hero Selection
 	hero_select_btn = OptionButton.new()
@@ -302,12 +307,12 @@ func _on_join_pressed():
 			
 		server_url = ws_protocol + host + ws_path
 	else:
-		# Fallback for local editor development
+		# Fallback for local editor / APK development
 		var server_input_text = $UI/Lobby/Panel/VBox/ServerInput.text.strip_edges()
 		if server_input_text != "":
 			server_url = server_input_text
 		else:
-			server_url = "ws://localhost:8090/ws"
+			server_url = "wss://prts.kyoiryi.top/archer/ws"
 		
 	# Append query param for nickname and hero class selection
 	var selected_hero_idx = hero_select_btn.selected
