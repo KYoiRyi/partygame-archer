@@ -66,6 +66,7 @@ var system_font: Font = null
 
 # --- Interpolation / Smooth Positions ---
 var smooth_positions: Dictionary = {}
+var status_label: Label = null
 
 func _ready():
 	system_font = ThemeDB.fallback_font
@@ -78,6 +79,14 @@ func _ready():
 		$UI/Lobby/Panel/VBox/ServerInput.visible = true
 		$UI/Lobby/Panel/VBox/ServerInput.text = ""
 		$UI/Lobby/Panel/VBox/ServerInput.placeholder_text = "wss://prts.kyoiryi.top/archer/ws (Default)"
+		
+	# Programmatic Status Label for Connection Status & Warnings
+	status_label = Label.new()
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3)) # light red
+	status_label.add_theme_font_size_override("font_size", 13)
+	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	$UI/Lobby/Panel/VBox.add_child(status_label)
 	
 	# Dynamic OptionButton for Hero Selection
 	hero_select_btn = OptionButton.new()
@@ -314,10 +323,14 @@ func _on_join_pressed():
 			var final_url = server_input_text
 			if not (final_url.begins_with("ws://") or final_url.begins_with("wss://")):
 				final_url = "ws://" + final_url
-			# If the input doesn't have a path component (e.g. ws://localhost:8090), append /ws
-			var path_start = final_url.find("/", 6) # find after ws:// or wss://
-			if path_start == -1:
-				final_url = final_url + "/ws"
+			
+			# If the input doesn't end with "/ws" (case insensitive), append it
+			var url_lower = final_url.to_lower()
+			if not url_lower.ends_with("/ws"):
+				if url_lower.ends_with("/"):
+					final_url = final_url + "ws"
+				else:
+					final_url = final_url + "/ws"
 			server_url = final_url
 		else:
 			server_url = "wss://prts.kyoiryi.top/archer/ws"
@@ -327,6 +340,9 @@ func _on_join_pressed():
 	var ws_url = server_url + "?name=" + nickname.uri_encode() + "&hero=" + str(selected_hero_idx)
 	
 	add_chat_message("System", "Connecting to " + ws_url + "...")
+	if status_label:
+		status_label.text = "Connecting to " + ws_url + "..."
+		status_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8)) # grey
 	
 	# Start connection state tracking
 	is_connecting = true
@@ -350,6 +366,8 @@ func _process(delta):
 			$UI/Lobby.visible = false
 			$UI/HUD.visible = true
 			add_chat_message("System", "Successfully connected!")
+			if status_label:
+				status_label.text = ""
 		
 		# Read server packets
 		while socket.get_available_packet_count() > 0:
@@ -380,6 +398,9 @@ func _process(delta):
 			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
 			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
 			add_chat_message("System", "Connection failed! Server might be offline.")
+			if status_label:
+				status_label.text = "Connection failed!\nEnsure local server is running.\nIf using PC, try entering its IP (e.g. 192.168.x.x:8090)\ninstead of localhost."
+				status_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3)) # light red
 			if OS.has_feature("web"):
 				JavaScriptBridge.eval("alert('无法连接到服务器，请检查网络或确认服务器已运行。 (Failed to connect to server. Ensure it is running.)')")
 				
@@ -392,6 +413,9 @@ func _process(delta):
 			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
 			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
 			add_chat_message("System", "Connection timed out.")
+			if status_label:
+				status_label.text = "Connection timed out.\nEnsure address is reachable & server is listening."
+				status_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3)) # light red
 			if OS.has_feature("web"):
 				JavaScriptBridge.eval("alert('连接超时，请确认服务器正常工作。 (Connection timed out.)')")
 	
