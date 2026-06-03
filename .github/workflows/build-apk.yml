@@ -48,9 +48,10 @@ jobs:
           rm templates.tpz
 
 
-      - name: Install Android Build Template
+      - name: Install Android Build Template (Manual Extraction)
         run: |
-          ./godot --headless --path client --install-android-build-template
+          mkdir -p client/android/build
+          unzip -q -o ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d client/android/build/
 
       - name: Enable Cleartext Traffic in AndroidManifest.xml
         run: |
