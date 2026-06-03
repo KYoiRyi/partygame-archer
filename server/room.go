@@ -1035,7 +1035,7 @@ func (r *Room) damageEntityAt(x, y float64, dmg float64, team string, attackerTy
 
 func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*Vector2, float64) {
 	var nearest *Vector2
-	minDist := rangeLimit
+	minDistSq := rangeLimit * rangeLimit
 	
 	// Check Players
 	for _, p := range r.Players {
@@ -1044,9 +1044,9 @@ func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*
 		}
 		dx := p.Position.X - pos.X
 		dy := p.Position.Y - pos.Y
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist < minDist {
-			minDist = dist
+		distSq := dx*dx + dy*dy
+		if distSq < minDistSq {
+			minDistSq = distSq
 			nearest = &Vector2{X: p.Position.X, Y: p.Position.Y}
 		}
 	}
@@ -1058,9 +1058,9 @@ func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*
 		}
 		dx := m.Position.X - pos.X
 		dy := m.Position.Y - pos.Y
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist < minDist {
-			minDist = dist
+		distSq := dx*dx + dy*dy
+		if distSq < minDistSq {
+			minDistSq = distSq
 			nearest = &Vector2{X: m.Position.X, Y: m.Position.Y}
 		}
 	}
@@ -1072,14 +1072,17 @@ func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*
 		}
 		dx := t.Position.X - pos.X
 		dy := t.Position.Y - pos.Y
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist < minDist {
-			minDist = dist
+		distSq := dx*dx + dy*dy
+		if distSq < minDistSq {
+			minDistSq = distSq
 			nearest = &Vector2{X: t.Position.X, Y: t.Position.Y}
 		}
 	}
 	
-	return nearest, minDist
+	if nearest != nil {
+		return nearest, math.Sqrt(minDistSq)
+	}
+	return nil, rangeLimit
 }
 
 func (r *Room) findNextTowerTarget(team string) *Tower {

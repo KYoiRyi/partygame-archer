@@ -380,11 +380,9 @@ func _process(delta):
 				if p_str.strip_edges() == "":
 					continue
 				
-				var json = JSON.new()
-				if json.parse(p_str) == OK:
-					var parsed_data = json.get_data()
-					if parsed_data is Dictionary:
-						_handle_server_message(parsed_data)
+				var parsed_data = JSON.parse_string(p_str)
+				if parsed_data is Dictionary:
+					_handle_server_message(parsed_data)
 					
 	elif state == WebSocketPeer.STATE_CLOSED:
 		if is_connected:
@@ -739,25 +737,27 @@ func _spawn_damage_juices(new_list: Array, old_hps: Dictionary):
 				var diff = old_hp - current_hp
 				var e_pos = _get_safe_vector2(e, "pos")
 				
-				# Spawn Damage Floating Text
-				damage_texts.append({
-					"pos": e_pos + Vector2(randf_range(-15, 15), -20),
-					"text": str(int(diff)),
-					"color": Color(1.0, 0.3, 0.3) if _get_safe_string(e, "team", "") != my_team else Color(1.0, 0.9, 0.2),
-					"life": 0.8
-				})
-				
-				# Hit Sparks
-				for i in range(6):
-					var speed = randf_range(80, 200)
-					var angle = randf_range(0, TAU)
-					hit_sparks.append({
-						"pos": e_pos,
-						"vel": Vector2(cos(angle), sin(angle)) * speed,
-						"color": Color(1.0, 0.6, 0.1) if _get_safe_string(e, "team", "") != my_team else Color(0.9, 0.2, 0.2),
-						"life": randf_range(0.2, 0.45),
-						"size": randf_range(2.0, 5.0)
+				# Spawn Damage Floating Text (Capped to prevent text clutter and performance drops)
+				if damage_texts.size() < 25:
+					damage_texts.append({
+						"pos": e_pos + Vector2(randf_range(-15, 15), -20),
+						"text": str(int(diff)),
+						"color": Color(1.0, 0.3, 0.3) if _get_safe_string(e, "team", "") != my_team else Color(1.0, 0.9, 0.2),
+						"life": 0.8
 					})
+				
+				# Hit Sparks (Capped and reduced from 6 to 3 sparks to avoid WebGL / Mobile drawing lag)
+				if hit_sparks.size() < 75:
+					for i in range(3):
+						var speed = randf_range(80, 200)
+						var angle = randf_range(0, TAU)
+						hit_sparks.append({
+							"pos": e_pos,
+							"vel": Vector2(cos(angle), sin(angle)) * speed,
+							"color": Color(1.0, 0.6, 0.1) if _get_safe_string(e, "team", "") != my_team else Color(0.9, 0.2, 0.2),
+							"life": randf_range(0.2, 0.45),
+							"size": randf_range(2.0, 5.0)
+						})
 				
 				# Trigger screen shake if I took damage
 				if e_id == client_id:
@@ -814,10 +814,6 @@ func add_chat_message(sender: String, message: String):
 	$UI/HUD/ChatBox/Scroll.scroll_vertical = 99999
 
 func _update_scoreboard():
-	# Clear scoreboard list
-	for c in $UI/HUD/Scoreboard/List.get_children():
-		c.queue_free()
-		
 	var players_list = _get_safe_array(game_state, "players")
 	if players_list == null:
 		return
@@ -834,24 +830,41 @@ func _update_scoreboard():
 		return a_score > b_score
 	)
 	
-	# Draw top 6
+	var list_container = $UI/HUD/Scoreboard/List
+	var existing_children = list_container.get_children()
+	var existing_count = existing_children.size()
+	
+	# Draw top 6 (Reuse existing label nodes to avoid GC spikes)
 	var count = 0
 	for p in list:
 		if not (p is Dictionary):
 			continue
 		if count >= 6: break
-		var l = Label.new()
+		
 		var p_name = _get_safe_string(p, "name", "Archer")
 		var p_team = _get_safe_string(p, "team", "blue")
 		var p_score = _get_safe_int(p, "score", 0)
 		var p_level = _get_safe_int(p, "level", 1)
-		l.text = p_name + " (" + p_team.to_upper() + "): " + str(p_score) + " (Lvl " + str(p_level) + ")"
+		var text_val = p_name + " (" + p_team.to_upper() + "): " + str(p_score) + " (Lvl " + str(p_level) + ")"
+		
+		var l: Label
+		if count < existing_count:
+			l = existing_children[count]
+			l.visible = true
+		else:
+			l = Label.new()
+			list_container.add_child(l)
+			
+		l.text = text_val
 		if p_team == "blue":
 			l.add_theme_color_override("font_color", Color(0.4, 0.6, 1.0))
 		else:
 			l.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
-		$UI/HUD/Scoreboard/List.add_child(l)
 		count += 1
+		
+	# Hide any extra labels that are no longer needed
+	for i in range(count, existing_count):
+		existing_children[i].visible = false
 
 # --- CUSTOM RENDERER ---
 func _on_world_draw():
@@ -868,8 +881,8 @@ func _on_world_draw():
 	var grid_color = Color(0.08, 0.12, 0.18)
 	world_node.draw_rect(Rect2(0, 0, 3000, 1200), background_color, true)
 	
-	# 2. Draw Background Grid (Culled to screen view for high performance)
-	var grid_size = 100
+	# 2. Draw Background Grid (Optimized grid_size = 200 to cut draw calls in half)
+	var grid_size = 200
 	var start_x = int(max(0, floor(view_min.x / grid_size) * grid_size))
 	var end_x = int(min(3000, ceil(view_max.x / grid_size) * grid_size))
 	var start_y = int(max(0, floor(view_min.y / grid_size) * grid_size))
@@ -880,7 +893,7 @@ func _on_world_draw():
 	for y in range(start_y, end_y + 1, grid_size):
 		world_node.draw_line(Vector2(max(0, view_min.x), y), Vector2(min(3000, view_max.x), y), grid_color, 1.0)
 		
-	# Tech dots at grid intersections for premium cyberpunk matrix styling
+	# Tech dots at grid intersections (Dramatically reduced iterations with larger grid layout)
 	var dot_color = Color(0.18, 0.36, 0.6, 0.35)
 	for x in range(start_x, end_x + 1, grid_size):
 		for y in range(start_y, end_y + 1, grid_size):
@@ -902,27 +915,24 @@ func _on_world_draw():
 		world_node.draw_circle(b.pos, pulse_radius, Color(0.08, 0.25, 0.16, 0.6))
 		# Glowing neon outline
 		world_node.draw_arc(b.pos, pulse_radius, 0.0, TAU, 32, Color(0.2, 0.85, 0.4, 0.75), 2.0)
-		# Floating internal energy particles
-		for i in range(3):
-			var angle_offset = time_ms * 0.0008 + i * (TAU / 3.0)
+		# Floating internal energy particles (Reduced count)
+		for i in range(2):
+			var angle_offset = time_ms * 0.0008 + i * (PI)
 			var offset_r = (b.radius * 0.5) + 5.0 * sin(time_ms * 0.002 + i)
 			var part_pos = b.pos + Vector2(cos(angle_offset), sin(angle_offset)) * offset_r
 			world_node.draw_circle(part_pos, 2.5, Color(0.4, 1.0, 0.6, 0.6))
 
-	# 4. Draw Obstacle Walls (Hazard cybernetic core walls)
+	# 4. Draw Obstacle Walls (Hazard cybernetic core walls - Optimized to draw simple crossing lines instead of loops)
 	for w in walls:
 		if w.x + w.w < view_min.x or w.x > view_max.x or w.y + w.h < view_min.y or w.y > view_max.y:
 			continue
 		var r = Rect2(w.x, w.y, w.w, w.h)
 		# Charcoal core
 		world_node.draw_rect(r, Color(0.06, 0.08, 0.12, 0.85), true)
-		# Diagonal safety stripe design
-		var stripe_color = Color(0.12, 0.22, 0.32, 0.4)
-		var step = 40.0
-		for i in range(0, int(w.w + w.h), int(step)):
-			var start = Vector2(w.x + max(0, i - w.h), w.y + min(w.h, i))
-			var end = Vector2(w.x + min(w.w, i), w.y + max(0, i - w.w))
-			world_node.draw_line(start, end, stripe_color, 2.0)
+		# Simple crossing cyber lines instead of 10+ separate loops
+		var stripe_color = Color(0.15, 0.28, 0.42, 0.6)
+		world_node.draw_line(Vector2(w.x, w.y), Vector2(w.x + w.w, w.y + w.h), stripe_color, 3.0)
+		world_node.draw_line(Vector2(w.x + w.w, w.y), Vector2(w.x, w.y + w.h), stripe_color, 3.0)
 		# Glowing cyan neon border
 		world_node.draw_rect(r, Color(0.15, 0.7, 1.0, 0.22), false, 5.0)
 		world_node.draw_rect(r, Color(0.2, 0.8, 1.0, 0.85), false, 2.0)
@@ -1073,14 +1083,10 @@ func _on_world_draw():
 			# Base HP bar
 			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -95), _get_safe_float(t, "hp", 0.0), _get_safe_float(t, "max_hp", 1.0), 150, 12)
 			
-			# Range circle (Dashed cyber target ring)
+			# Range circle (Optimized: single continuous circle draw_arc instead of 24 loops)
 			var range_rad = 550.0
 			world_node.draw_circle(t_pos, range_rad, range_color)
-			var segments = 24
-			for i in range(segments):
-				var a1 = i * (TAU / segments) + time_ms * 0.0001
-				var a2 = a1 + (TAU / segments) * 0.5
-				world_node.draw_arc(t_pos, range_rad, a1, a2, 16, t_color * Color(1.0, 1.0, 1.0, 0.25), 1.5)
+			world_node.draw_arc(t_pos, range_rad, 0.0, TAU, 48, t_color * Color(1.0, 1.0, 1.0, 0.3), 1.5)
 			
 			# Octagonal outer neon structure
 			var base_radius = 80.0 * pulse_scale
@@ -1106,14 +1112,10 @@ func _on_world_draw():
 			# HP bar
 			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -60), _get_safe_float(t, "hp", 0.0), _get_safe_float(t, "max_hp", 1.0), 80, 8)
 			
-			# Range circle
+			# Range circle (Optimized: single continuous circle draw_arc instead of 16 loops)
 			var range_rad = 400.0
 			world_node.draw_circle(t_pos, range_rad, range_color)
-			var segments = 16
-			for i in range(segments):
-				var a1 = i * (TAU / segments) - time_ms * 0.0001
-				var a2 = a1 + (TAU / segments) * 0.5
-				world_node.draw_arc(t_pos, range_rad, a1, a2, 12, t_color * Color(1.0, 1.0, 1.0, 0.25), 1.2)
+			world_node.draw_arc(t_pos, range_rad, 0.0, TAU, 36, t_color * Color(1.0, 1.0, 1.0, 0.3), 1.2)
 			
 			# Tower metal shell (Square/diamond protective grid)
 			var base_size = 40.0 * pulse_scale
@@ -1192,6 +1194,10 @@ func _on_world_draw():
 		var p_pos = smooth_positions.get(p_id)
 		if p_pos == null:
 			p_pos = _get_safe_vector2(p, "pos")
+			
+		# Cull off-screen players to dramatically optimize draw calls
+		if p_id != client_id and p_pos.distance_to(cam_pos) > 850.0:
+			continue
 			
 		if _get_safe_bool(p, "dead", false):
 			if p_id == client_id:
