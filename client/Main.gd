@@ -397,9 +397,10 @@ func _process(delta):
 		var shake_offset = Vector2.ZERO
 		if screen_shake > 0:
 			shake_offset = Vector2(randf_range(-screen_shake, screen_shake), randf_range(-screen_shake, screen_shake))
-			screen_shake = lerp(screen_shake, 0.0, 10.0 * delta)
+			screen_shake = lerp(screen_shake, 0.0, clamp(10.0 * delta, 0.0, 1.0))
 			
-		$Camera2D.position = $Camera2D.position.lerp(target_cam_pos, 8.0 * delta) + shake_offset
+		var cam_weight = clamp(8.0 * delta, 0.0, 1.0)
+		$Camera2D.position = $Camera2D.position.lerp(target_cam_pos, cam_weight) + shake_offset
 	
 	# 3. Process Input (If connected and not chatting)
 	if is_connected and not is_chatting and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
@@ -1317,7 +1318,8 @@ func _update_smooth_positions(delta):
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
 		else:
-			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 18.0 * delta)
+			var t = clamp(18.0 * delta, 0.0, 1.0)
+			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
 			
 	# Interpolate Minion positions safely
 	var minions_list = _get_safe_array(game_state, "minions")
@@ -1332,7 +1334,8 @@ func _update_smooth_positions(delta):
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
 		else:
-			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 18.0 * delta)
+			var t = clamp(18.0 * delta, 0.0, 1.0)
+			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
 			
 	# Interpolate Projectile positions safely
 	var projectiles_list = _get_safe_array(game_state, "projectiles")
@@ -1347,7 +1350,8 @@ func _update_smooth_positions(delta):
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
 		else:
-			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 26.0 * delta)
+			var t = clamp(26.0 * delta, 0.0, 1.0)
+			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
 
 	# Interpolate Gem positions safely
 	var gems_list = _get_safe_array(game_state, "gems")
@@ -1362,7 +1366,8 @@ func _update_smooth_positions(delta):
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
 		else:
-			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 12.0 * delta)
+			var t = clamp(12.0 * delta, 0.0, 1.0)
+			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
 			
 	# Clean up positions for removed entities
 	var old_ids = smooth_positions.keys()
