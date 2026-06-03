@@ -3,9 +3,9 @@ import zipfile
 import os
 import sys
 
-URL = "https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_export_templates.tpz"
+URL = "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz"
 ZIP_PATH = "templates.tpz"
-TARGET_DIR = os.path.expanduser("~/.local/share/godot/export_templates/4.2.2.stable")
+TARGET_DIR = os.path.expanduser("~/.local/share/godot/export_templates/4.3.stable")
 
 def progress_callback(block_num, block_size, total_size):
     downloaded = block_num * block_size

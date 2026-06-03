@@ -3,10 +3,10 @@ import zipfile
 import os
 import sys
 
-URL = "https://github.com/godotengine/godot/releases/download/4.2.2-stable/Godot_v4.2.2-stable_linux.x86_64.zip"
+URL = "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip"
 ZIP_PATH = "godot.zip"
 EXE_PATH = "godot"
-FINAL_NAME = "Godot_v4.2.2-stable_linux.x86_64"
+FINAL_NAME = "Godot_v4.3-stable_linux.x86_64"
 
 def progress_callback(block_num, block_size, total_size):
     downloaded = block_num * block_size
