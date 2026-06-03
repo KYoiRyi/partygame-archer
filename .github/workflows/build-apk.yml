@@ -50,8 +50,9 @@ jobs:
 
       - name: Install Android Build Template (Manual Extraction)
         run: |
-          mkdir -p client/android
-          unzip -q -o ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d client/android/
+          mkdir -p client/android/build
+          unzip -q -o ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d client/android/build/
+          echo "4.3.stable" > client/android/.build_version
 
       - name: Enable Cleartext Traffic in AndroidManifest.xml
         run: |
