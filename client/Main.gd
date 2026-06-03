@@ -43,6 +43,7 @@ var aim_center: Vector2 = Vector2.ZERO
 var aim_pos: Vector2 = Vector2.ZERO
 var aim_touch_index: int = -1
 var hero_select_btn: OptionButton
+var client_shoot_cooldown: float = 0.0
 
 # --- Skill Mapping ---
 const SKILL_NAMES = {
@@ -165,6 +166,9 @@ func _input(event: InputEvent):
 				if joystick_draw_node:
 					joystick_draw_node.queue_redraw()
 			elif event.index == aim_touch_index:
+				var drag_offset = aim_pos - aim_center
+				if drag_offset.length() < 18.0:
+					_trigger_quick_tap_shoot()
 				aim_active = false
 				aim_touch_index = -1
 				if joystick_draw_node:
@@ -205,15 +209,10 @@ func _input(event: InputEvent):
 				joystick_draw_node.queue_redraw()
 				
 		elif event.index == aim_touch_index and aim_active:
-			aim_pos = event.position
 			var offset = event.position - aim_center
-			if offset.length() > 15.0:
-				var shoot_angle = offset.angle()
-				var msg = {
-					"type": "shoot",
-					"angle": shoot_angle
-				}
-				socket.send_text(JSON.stringify(msg))
+			if offset.length() > JOYSTICK_MAX_DRAG:
+				offset = offset.normalized() * JOYSTICK_MAX_DRAG
+			aim_pos = aim_center + offset
 				
 			if joystick_draw_node:
 				joystick_draw_node.queue_redraw()
@@ -233,16 +232,22 @@ func _on_joystick_draw():
 		joystick_draw_node.draw_arc(joystick_pos, 24.0, 0.0, TAU, 24, Color.WHITE, 2.0)
 		
 	if aim_active:
-		# Draw outer ring for aiming (red glow)
-		joystick_draw_node.draw_circle(aim_center, 50.0, Color(1, 1, 1, 0.08))
-		joystick_draw_node.draw_arc(aim_center, 50.0, 0.0, TAU, 36, Color(1.0, 0.3, 0.3, 0.35), 3.0)
+		# Draw outer ring for aiming (red glow, matches JOYSTICK_MAX_DRAG)
+		joystick_draw_node.draw_circle(aim_center, JOYSTICK_MAX_DRAG, Color(1, 1, 1, 0.08))
+		joystick_draw_node.draw_arc(aim_center, JOYSTICK_MAX_DRAG, 0.0, TAU, 36, Color(1.0, 0.3, 0.3, 0.35), 3.0)
+		joystick_draw_node.draw_arc(aim_center, JOYSTICK_MAX_DRAG - 2, 0.0, TAU, 36, Color(1.0, 0.3, 0.3, 0.1), 1.0)
 		joystick_draw_node.draw_circle(aim_center, 6.0, Color(1.0, 0.3, 0.3, 0.5))
+		
+		# Draw floating aim handle (red glow)
+		joystick_draw_node.draw_circle(aim_pos, 28.0, Color(1.0, 0.3, 0.3, 0.25))
+		joystick_draw_node.draw_circle(aim_pos, 24.0, Color(1.0, 0.3, 0.3, 0.75))
+		joystick_draw_node.draw_arc(aim_pos, 24.0, 0.0, TAU, 24, Color.WHITE, 2.0)
 		
 		# Draw line representing the direction of shoot
 		var offset = aim_pos - aim_center
 		if offset.length() > 15.0:
 			var dir = offset.normalized()
-			var line_end = aim_center + dir * 65.0
+			var line_end = aim_center + dir * (JOYSTICK_MAX_DRAG - 5.0)
 			# Draw indicator arrow line
 			joystick_draw_node.draw_line(aim_center, line_end, Color(1.0, 0.3, 0.3, 0.8), 4.0)
 			# Draw arrow head
@@ -442,18 +447,112 @@ func _process_movement_input(delta):
 		socket.send_text(JSON.stringify(msg))
 
 func _process_aiming_input(delta):
-	# Manual Shoot: hold left mouse click to aim and shoot
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if client_shoot_cooldown > 0:
+		client_shoot_cooldown -= delta
+
+	var want_shoot = false
+	var shoot_angle = 0.0
+
+	if aim_active:
+		# Mobile touch aiming
+		var offset = aim_pos - aim_center
+		if offset.length() > 15.0:
+			want_shoot = true
+			shoot_angle = offset.angle()
+	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not is_chatting:
+		# Desktop mouse aiming
 		var mouse_pos = get_global_mouse_position()
 		if my_player_data is Dictionary:
 			var p_pos = _get_safe_vector2(my_player_data, "pos")
-			var angle = (mouse_pos - p_pos).angle()
-			
+			want_shoot = true
+			shoot_angle = (mouse_pos - p_pos).angle()
+
+	if want_shoot:
+		if client_shoot_cooldown <= 0:
 			var msg = {
 				"type": "shoot",
-				"angle": angle
+				"angle": shoot_angle
 			}
 			socket.send_text(JSON.stringify(msg))
+			
+			# Calculate cooldown locally to match server base classes
+			var base_cd = 0.25
+			var hero = _get_safe_string(my_player_data, "hero", "ranger")
+			if hero == "knight":
+				base_cd = 0.40
+			elif hero == "mage":
+				base_cd = 0.35
+			
+			var atk_speed_lvl = 0
+			if my_player_data is Dictionary:
+				var skills = my_player_data.get("skills", {})
+				if skills is Dictionary:
+					atk_speed_lvl = skills.get("atk_speed", 0)
+			
+			client_shoot_cooldown = base_cd * pow(0.85, atk_speed_lvl) - 0.02 # 20ms margin
+
+func _trigger_quick_tap_shoot():
+	# Find nearest enemy in range and fire
+	if game_state is Dictionary and my_player_data is Dictionary:
+		var my_pos = _get_safe_vector2(my_player_data, "pos")
+		var nearest_enemy = null
+		var min_dist = 600.0 # Auto shoot range
+		
+		# Find nearest player
+		var players = _get_safe_array(game_state, "players")
+		for p in players:
+			if not (p is Dictionary): continue
+			if _get_safe_string(p, "id") == client_id or _get_safe_bool(p, "dead"):
+				continue
+			if _get_safe_string(p, "team") != my_team:
+				var p_pos = _get_safe_vector2(p, "pos")
+				var dist = my_pos.distance_to(p_pos)
+				if dist < min_dist:
+					min_dist = dist
+					nearest_enemy = p_pos
+					
+		# Find nearest minion
+		var minions = _get_safe_array(game_state, "minions")
+		for m in minions:
+			if not (m is Dictionary): continue
+			if _get_safe_string(m, "team") != my_team:
+				var m_pos = _get_safe_vector2(m, "pos")
+				var dist = my_pos.distance_to(m_pos)
+				if dist < min_dist:
+					min_dist = dist
+					nearest_enemy = m_pos
+					
+		# Find nearest tower
+		var towers = _get_safe_array(game_state, "towers")
+		for t in towers:
+			if not (t is Dictionary): continue
+			if _get_safe_string(t, "team") != my_team:
+				var t_pos = _get_safe_vector2(t, "pos")
+				var dist = my_pos.distance_to(t_pos)
+				if dist < min_dist:
+					min_dist = dist
+					nearest_enemy = t_pos
+					
+		if nearest_enemy != null:
+			var shoot_angle = (nearest_enemy - my_pos).angle()
+			var msg = {
+				"type": "shoot",
+				"angle": shoot_angle
+			}
+			socket.send_text(JSON.stringify(msg))
+			
+			# Trigger local cooldown
+			var base_cd = 0.25
+			var hero = _get_safe_string(my_player_data, "hero", "ranger")
+			if hero == "knight":
+				base_cd = 0.40
+			elif hero == "mage":
+				base_cd = 0.35
+			var atk_speed_lvl = 0
+			var skills = my_player_data.get("skills", {})
+			if skills is Dictionary:
+				atk_speed_lvl = skills.get("atk_speed", 0)
+			client_shoot_cooldown = base_cd * pow(0.85, atk_speed_lvl) - 0.02
 
 func _update_visual_effects(delta):
 	# Update damage texts
@@ -853,22 +952,69 @@ func _on_world_draw():
 		var proj_team = _get_safe_string(proj, "team", "blue")
 		var arrow_color = Color(0.4, 0.7, 1.0) if proj_team == "blue" else Color(1.0, 0.4, 0.4)
 		
+		# Detect active elemental effects
+		var effects = _get_safe_array(proj, "effects")
+		var is_fire = false
+		var is_ice = false
+		var is_poison = false
+		for eff in effects:
+			if eff == "fire": is_fire = true
+			elif eff == "ice": is_ice = true
+			elif eff == "poison": is_poison = true
+			
+		if is_fire:
+			arrow_color = Color(1.0, 0.45, 0.1) # Bright fire orange
+		elif is_ice:
+			arrow_color = Color(0.2, 0.85, 1.0) # Frozen cyan
+		elif is_poison:
+			arrow_color = Color(0.75, 0.15, 0.9) # Acid purple
+		
 		# Draw trailing plasma beam glow
 		var trail_length = 26.0
 		var back_p = p_pos - vel * trail_length
-		world_node.draw_line(back_p - vel * 4.0, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.25), 6.0)
-		world_node.draw_line(back_p, p_pos, arrow_color, 3.0)
 		
-		# Arrow head
+		# Wider soft glow
+		world_node.draw_line(back_p - vel * 4.0, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.2), 6.0)
+		# Solid core line
+		world_node.draw_line(back_p, p_pos, arrow_color, 2.5)
+		
 		var head_angle = vel.angle()
-		var pts = PackedVector2Array([
-			p_pos,
-			p_pos + Vector2(cos(head_angle + 2.5), sin(head_angle + 2.5)) * 8.5,
-			p_pos + Vector2(cos(head_angle - 2.5), sin(head_angle - 2.5)) * 8.5
-		])
-		world_node.draw_colored_polygon(pts, arrow_color)
-		# Draw high-intensity white core
-		world_node.draw_circle(p_pos - vel * 2.0, 2.0, Color.WHITE)
+		if is_ice:
+			# Shard shape for ice
+			var ice_pts = PackedVector2Array([
+				p_pos,
+				p_pos - vel.rotated(0.35) * 12.0,
+				p_pos - vel * 18.0,
+				p_pos - vel.rotated(-0.35) * 12.0
+			])
+			world_node.draw_colored_polygon(ice_pts, Color(0.4, 0.9, 1.0, 0.95))
+			world_node.draw_polyline(ice_pts, Color.WHITE, 1.5)
+		elif is_fire:
+			# Fireball flame polygon (wiggles slightly)
+			var fire_pts = PackedVector2Array([
+				p_pos + vel * 3.0,
+				p_pos - vel.rotated(0.6) * 10.0 + vel.orthogonal() * 2.0 * sin(time_ms * 0.05),
+				p_pos - vel * 15.0,
+				p_pos - vel.rotated(-0.6) * 10.0 - vel.orthogonal() * 2.0 * sin(time_ms * 0.05)
+			])
+			world_node.draw_colored_polygon(fire_pts, Color(1.0, 0.35, 0.0))
+			world_node.draw_polyline(fire_pts, Color(1.0, 0.9, 0.3), 1.0)
+			world_node.draw_circle(p_pos - vel * 2.0, 3.5, Color.WHITE)
+		elif is_poison:
+			# Bubble blob for poison
+			world_node.draw_circle(p_pos, 5.0, Color(0.8, 0.1, 1.0))
+			world_node.draw_circle(p_pos - vel * 6.0, 3.5, Color(0.6, 0.05, 0.9))
+			world_node.draw_circle(p_pos - vel * 12.0, 2.5, Color(0.5, 0.0, 0.8))
+			world_node.draw_circle(p_pos, 2.0, Color.WHITE)
+		else:
+			# Normal arrow head
+			var pts = PackedVector2Array([
+				p_pos,
+				p_pos + Vector2(cos(head_angle + 2.5), sin(head_angle + 2.5)) * 8.5,
+				p_pos + Vector2(cos(head_angle - 2.5), sin(head_angle - 2.5)) * 8.5
+			])
+			world_node.draw_colored_polygon(pts, arrow_color)
+			world_node.draw_circle(p_pos - vel * 2.0, 2.0, Color.WHITE)
 
 	# 7. Draw Towers & Core Bases (Pulsing base orbs, rotating cyber shields, range rings)
 	var towers_list = _get_safe_array(game_state, "towers")
@@ -931,17 +1077,27 @@ func _on_world_draw():
 				var a2 = a1 + (TAU / segments) * 0.5
 				world_node.draw_arc(t_pos, range_rad, a1, a2, 12, t_color * Color(1.0, 1.0, 1.0, 0.25), 1.2)
 			
-			# Tower metal shell
-			world_node.draw_circle(t_pos, 45.0, Color(0.08, 0.1, 0.13, 0.95))
-			world_node.draw_arc(t_pos, 45.0, 0.0, TAU, 24, t_color * Color(1, 1, 1, 0.45), 3.0)
+			# Tower metal shell (Square/diamond protective grid)
+			var base_size = 40.0 * pulse_scale
+			var tower_pts = PackedVector2Array([
+				t_pos + Vector2(-base_size, -base_size).rotated(shield_angle * 0.25),
+				t_pos + Vector2(base_size, -base_size).rotated(shield_angle * 0.25),
+				t_pos + Vector2(base_size, base_size).rotated(shield_angle * 0.25),
+				t_pos + Vector2(-base_size, base_size).rotated(shield_angle * 0.25)
+			])
+			world_node.draw_colored_polygon(tower_pts, Color(0.06, 0.08, 0.12, 0.95))
+			world_node.draw_polyline(tower_pts, t_color * Color(1, 1, 1, 0.6), 3.0)
 			
-			# Rotating shield rings
-			world_node.draw_arc(t_pos, 35.0, shield_angle, shield_angle + PI * 0.5, 12, t_color, 2.5)
-			world_node.draw_arc(t_pos, 35.0, shield_angle + PI, shield_angle + PI * 1.5, 12, t_color, 2.5)
+			# Inner tech core rings
+			world_node.draw_arc(t_pos, 28.0, 0.0, TAU, 24, t_color * Color(1, 1, 1, 0.35), 1.5)
 			
-			# Core orb
-			world_node.draw_circle(t_pos, 22.0 * pulse_scale, t_color)
-			world_node.draw_circle(t_pos, 10.0 * pulse_scale, Color.WHITE)
+			# Rotating core shield rings
+			world_node.draw_arc(t_pos, 35.0, shield_angle, shield_angle + PI * 0.5, 16, t_color, 2.5)
+			world_node.draw_arc(t_pos, 35.0, shield_angle + PI, shield_angle + PI * 1.5, 16, t_color, 2.5)
+			
+			# Core glowing orb
+			world_node.draw_circle(t_pos, 18.0 * pulse_scale, t_color)
+			world_node.draw_circle(t_pos, 8.0 * pulse_scale, Color.WHITE)
 
 	# 8. Draw Minions (Cybernetic march drones)
 	var minions_list = _get_safe_array(game_state, "minions")
@@ -966,14 +1122,24 @@ func _on_world_draw():
 		var m_team = _get_safe_string(m, "team", "blue")
 		var m_color = Color(0.4, 0.6, 1.0) if m_team == "blue" else Color(1.0, 0.5, 0.5)
 		
-		world_node.draw_circle(m_pos, rad + 2.0, m_color * Color(1, 1, 1, 0.25))
-		world_node.draw_circle(m_pos, rad, Color(0.08, 0.1, 0.13))
-		world_node.draw_circle(m_pos, rad - 3.0, m_color)
-		
-		# Drone pointer/indicator
+		# Draw minion as a triangular cyber fighter drone pointing in its target direction
 		var target_vel = Vector2(_get_safe_float(m, "target_x", 0.0) - m_pos.x, _get_safe_float(m, "target_y", 0.0) - m_pos.y).normalized()
-		world_node.draw_line(m_pos, m_pos + target_vel * (rad + 5.0), Color.WHITE, 2.5)
-		world_node.draw_circle(m_pos + target_vel * (rad + 3.0), 3.0, Color.WHITE)
+		if target_vel == Vector2.ZERO:
+			target_vel = Vector2.RIGHT
+			
+		var m_angle = target_vel.angle()
+		var m_pts = PackedVector2Array([
+			m_pos + target_vel * (rad + 3.0),
+			m_pos + target_vel.rotated(2.3) * rad,
+			m_pos + target_vel.rotated(-2.3) * rad
+		])
+		world_node.draw_circle(m_pos, rad + 4.0, m_color * Color(1, 1, 1, 0.15))
+		world_node.draw_colored_polygon(m_pts, Color(0.06, 0.08, 0.12, 0.95))
+		world_node.draw_polyline(m_pts, m_color, 2.5)
+		
+		# Inner core
+		world_node.draw_circle(m_pos - target_vel * 3.0, 3.5 * minion_scale, m_color * Color(1, 1, 1, 0.4))
+		world_node.draw_circle(m_pos - target_vel * 3.0, 1.5 * minion_scale, Color.WHITE)
 		
 		# HP bar
 		_draw_entity_health_bar(world_node, m_pos + Vector2(0, -25), _get_safe_float(m, "hp", 0.0), _get_safe_float(m, "max_hp", 1.0), 30, 4)
