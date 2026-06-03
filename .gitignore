@@ -7,4 +7,3 @@ game_server
 
 # Ignore Godot import cache
 client/.godot/
-client/export_presets.cfg
