@@ -76,7 +76,8 @@ func _ready():
 		$UI/Lobby/Panel/VBox/ServerInput.visible = false
 	else:
 		$UI/Lobby/Panel/VBox/ServerInput.visible = true
-		$UI/Lobby/Panel/VBox/ServerInput.text = "wss://prts.kyoiryi.top/archer/ws"
+		$UI/Lobby/Panel/VBox/ServerInput.text = ""
+		$UI/Lobby/Panel/VBox/ServerInput.placeholder_text = "wss://prts.kyoiryi.top/archer/ws (Default)"
 	
 	# Dynamic OptionButton for Hero Selection
 	hero_select_btn = OptionButton.new()
@@ -310,7 +311,14 @@ func _on_join_pressed():
 		# Fallback for local editor / APK development
 		var server_input_text = $UI/Lobby/Panel/VBox/ServerInput.text.strip_edges()
 		if server_input_text != "":
-			server_url = server_input_text
+			var final_url = server_input_text
+			if not (final_url.begins_with("ws://") or final_url.begins_with("wss://")):
+				final_url = "ws://" + final_url
+			# If the input doesn't have a path component (e.g. ws://localhost:8090), append /ws
+			var path_start = final_url.find("/", 6) # find after ws:// or wss://
+			if path_start == -1:
+				final_url = final_url + "/ws"
+			server_url = final_url
 		else:
 			server_url = "wss://prts.kyoiryi.top/archer/ws"
 		
