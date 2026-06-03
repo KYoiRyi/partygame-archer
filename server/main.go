@@ -62,6 +62,7 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		fileServer.ServeHTTP(w, r)
 	})
