@@ -50,8 +50,8 @@ jobs:
 
       - name: Install Android Build Template (Manual Extraction)
         run: |
-          mkdir -p client/android/build
-          unzip -q -o ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d client/android/build/
+          mkdir -p client/android
+          unzip -q -o ~/.local/share/godot/export_templates/4.3.stable/android_source.zip -d client/android/
 
       - name: Enable Cleartext Traffic in AndroidManifest.xml
         run: |
@@ -77,7 +77,7 @@ jobs:
           mkdir -p ~/.config/godot
           python3 -c '
           import os
-          content = """[godot_resource type="EditorSettings" format=3]
+          content = """[gd_resource type="EditorSettings" format=3]
 
           [resource]
           export/android/android_sdk_path = "{}"
