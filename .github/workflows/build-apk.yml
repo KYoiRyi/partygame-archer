@@ -75,14 +75,20 @@ jobs:
       - name: Configure Godot Editor Settings
         run: |
           mkdir -p ~/.config/godot
-          cat <<EOF > ~/.config/godot/editor_settings-4.tres
-[godot_resource type="EditorSettings" format=3]
+          python3 -c '
+          import os
+          content = """[godot_resource type="EditorSettings" format=3]
 
-[resource]
-export/android/android_sdk_path = "$ANDROID_HOME"
-export/android/java_sdk_path = "$JAVA_HOME"
-export/android/debug_keystore = "$GITHUB_WORKSPACE/client/debug.keystore"
-EOF
+          [resource]
+          export/android/android_sdk_path = "{}"
+          export/android/java_sdk_path = "{}"
+          export/android/debug_keystore = "{}"
+          """.format(os.environ.get("ANDROID_HOME", ""), os.environ.get("JAVA_HOME", ""), os.environ.get("GITHUB_WORKSPACE", "") + "/client/debug.keystore")
+          lines = [line.strip() for line in content.splitlines()]
+          with open(os.path.expanduser("~/.config/godot/editor_settings-4.tres"), "w", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          print("Editor settings configured successfully")
+          '
 
       - name: Export APK
         run: |
