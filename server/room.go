@@ -302,6 +302,11 @@ func (r *Room) handlePlayerInput(playerID string, msg ClientMessage) {
 		p.Moving = msg.IsMoving
 		p.MoveDir = Vector2{X: msg.X, Y: msg.Y}
 		p.Angle = msg.Angle
+	case "dash":
+		if p.DashCooldown <= 0 {
+			p.DashTimer = 0.2
+			p.DashCooldown = 2.0 // 2 seconds cooldown
+		}
 	case "shoot":
 		r.playerShoot(p, msg.Angle)
 	case "select_skill":
@@ -516,8 +521,17 @@ func (r *Room) tick(dt float64) {
 	if r.gemTimer >= 4.0 {
 		if len(r.Gems) < 50 {
 			r.spawnGem("xp")
-			if rand.Float64() < 0.25 {
+			randVal := rand.Float64()
+			if randVal < 0.10 {
 				r.spawnGem("hp")
+			} else if randVal < 0.15 {
+				r.spawnGem("bomb")
+			} else if randVal < 0.20 {
+				r.spawnGem("mushroom")
+			} else if randVal < 0.25 {
+				r.spawnGem("star")
+			} else if randVal < 0.30 {
+				r.spawnGem("haste")
 			}
 		}
 		r.gemTimer = 0.0
@@ -543,10 +557,35 @@ func (r *Room) tick(dt float64) {
 			r.damagePlayer(p, 6.0 * dt, "")
 		}
 		
+		if p.InvincibleTimer > 0 {
+			p.InvincibleTimer -= dt
+		}
+		if p.GiantTimer > 0 {
+			p.GiantTimer -= dt
+		}
+		if p.HasteTimer > 0 {
+			p.HasteTimer -= dt
+		}
+		if p.DashTimer > 0 {
+			p.DashTimer -= dt
+		}
+		if p.DashCooldown > 0 {
+			p.DashCooldown -= dt
+		}
+		
 		speedMultiplier := 1.0
 		if p.IceTimer > 0 {
 			p.IceTimer -= dt
 			speedMultiplier = 0.55
+		}
+		if p.HasteTimer > 0 {
+			speedMultiplier *= 1.8
+		}
+		if p.GiantTimer > 0 {
+			speedMultiplier *= 0.6 // Giant is slower
+		}
+		if p.DashTimer > 0 {
+			speedMultiplier *= 5.0 // Dash burst speed
 		}
 		
 		if p.ShootCooldown > 0 {
@@ -792,11 +831,30 @@ func (r *Room) tick(dt float64) {
 }
 
 func (r *Room) collectGem(p *Player, g *Gem) {
-	if g.Type == "hp" {
+	switch g.Type {
+	case "hp":
 		p.HP += 30.0
 		if p.HP > p.MaxHP {
 			p.HP = p.MaxHP
 		}
+		return
+	case "bomb":
+		r.triggerExplosion(g.Position.X, g.Position.Y, 200.0, 150.0, p.Team)
+		r.broadcastChat("system", fmt.Sprintf("💣 %s picked up a BOMB! BOOM!", p.Name))
+		return
+	case "mushroom":
+		p.GiantTimer = 10.0
+		p.MaxHP += 50.0
+		p.HP += 50.0
+		r.broadcastChat("system", fmt.Sprintf("🍄 %s grew GIANT!", p.Name))
+		return
+	case "star":
+		p.InvincibleTimer = 8.0
+		r.broadcastChat("system", fmt.Sprintf("⭐ %s became INVINCIBLE!", p.Name))
+		return
+	case "haste":
+		p.HasteTimer = 8.0
+		r.broadcastChat("system", fmt.Sprintf("⚡ %s got a HASTE boost!", p.Name))
 		return
 	}
 	
@@ -814,6 +872,62 @@ func (r *Room) collectGem(p *Player, g *Gem) {
 		
 		// Send level up skills choices (random 3)
 		r.triggerLevelUp(p)
+	}
+}
+
+func (r *Room) triggerExplosion(x, y, radius, damage float64, safeTeam string) {
+	// Broadcast effect to clients
+	r.broadcastEffect("bomb", x, y)
+	
+	// Damage players
+	for _, p := range r.Players {
+		if p.Dead || p.Team == safeTeam || p.InvincibleTimer > 0 {
+			continue
+		}
+		dx := p.Position.X - x
+		dy := p.Position.Y - y
+		if math.Sqrt(dx*dx + dy*dy) <= radius {
+			r.damagePlayer(p, damage, "")
+		}
+	}
+	// Damage minions
+	for _, m := range r.Minions {
+		if m.Team == safeTeam {
+			continue
+		}
+		dx := m.Position.X - x
+		dy := m.Position.Y - y
+		if math.Sqrt(dx*dx + dy*dy) <= radius {
+			m.HP -= damage
+		}
+	}
+	// Damage towers
+	for _, t := range r.Towers {
+		if t.Team == safeTeam {
+			continue
+		}
+		dx := t.Position.X - x
+		dy := t.Position.Y - y
+		if math.Sqrt(dx*dx + dy*dy) <= radius {
+			t.HP -= damage
+		}
+	}
+}
+
+func (r *Room) broadcastEffect(effectType string, x, y float64) {
+	msg := ServerMessage{
+		Type:       "effect",
+		EffectType: effectType,
+		EffectX:    x,
+		EffectY:    y,
+	}
+	if data, err := json.Marshal(msg); err == nil {
+		for _, p := range r.Players {
+			select {
+			case p.send <- data:
+			default:
+			}
+		}
 	}
 }
 
@@ -959,7 +1073,7 @@ func (r *Room) checkProjectileHit(proj *Projectile) {
 }
 
 func (r *Room) damagePlayer(p *Player, dmg float64, attackerID string) {
-	if p.Dead {
+	if p.Dead || p.InvincibleTimer > 0 {
 		return
 	}
 	p.HP -= dmg

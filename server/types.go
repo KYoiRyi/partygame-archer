@@ -47,6 +47,11 @@ type Player struct {
 	FireTimer     float64        `json:"fire_timer"`
 	IceTimer      float64        `json:"ice_timer"`
 	PoisonTimer   float64        `json:"poison_timer"`
+	InvincibleTimer float64      `json:"invincible_timer"`
+	GiantTimer    float64        `json:"giant_timer"`
+	HasteTimer    float64        `json:"haste_timer"`
+	DashTimer     float64        `json:"dash_timer"`
+	DashCooldown  float64        `json:"-"`
 	IsBot         bool           `json:"is_bot"`
 	Hero          string         `json:"hero"`
 
@@ -100,7 +105,7 @@ type Gem struct {
 	ID       string  `json:"id"`
 	Position Vector2 `json:"pos"`
 	XPValue  int     `json:"xp"`
-	Type     string  `json:"type"` // "xp", "hp"
+	Type     string  `json:"type"` // "xp", "hp", "bomb", "mushroom", "star", "haste"
 }
 
 type Wall struct {
@@ -148,4 +153,7 @@ type ServerMessage struct {
 	KillerName    string            `json:"killer_name,omitempty"`
 	VictimName    string            `json:"victim_name,omitempty"`
 	Walls         []Wall            `json:"walls,omitempty"`
+	EffectType    string            `json:"effect_type,omitempty"`
+	EffectX       float64           `json:"effect_x,omitempty"`
+	EffectY       float64           `json:"effect_y,omitempty"`
 }

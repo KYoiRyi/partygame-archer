@@ -69,6 +69,7 @@ var system_font: Font = null
 # --- Interpolation / Smooth Positions ---
 var smooth_positions: Dictionary = {}
 var status_label: Label = null
+var client_dash_cooldown: float = 0.0
 
 func _ready():
 	system_font = ThemeDB.fallback_font
@@ -129,9 +130,34 @@ func _ready():
 			"pos": Vector2(randf_range(200, 2800), randf_range(100, 1100)),
 			"radius": randf_range(60, 95)
 		})
+		
+	# Dash Button for Mobile & UI
+	var dash_btn = Button.new()
+	dash_btn.name = "DashButton"
+	dash_btn.text = "⚡ DASH"
+	dash_btn.add_theme_font_size_override("font_size", 22)
+	dash_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	dash_btn.offset_left = -260
+	dash_btn.offset_top = -200
+	dash_btn.offset_right = -120
+	dash_btn.offset_bottom = -120
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.1, 0.5, 1.0, 0.5)
+	sb.corner_radius_top_left = 40
+	sb.corner_radius_top_right = 40
+	sb.corner_radius_bottom_left = 40
+	sb.corner_radius_bottom_right = 40
+	dash_btn.add_theme_stylebox_override("normal", sb)
+	dash_btn.pressed.connect(_on_dash_pressed)
+	$UI/HUD.add_child(dash_btn)
 	
 	# Initial window setup
 	get_viewport().files_dropped.connect(func(files): pass)
+
+func _on_dash_pressed():
+	if client_dash_cooldown <= 0 and is_connected and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
+		client_dash_cooldown = 2.0
+		socket.send_text(JSON.stringify({"type": "dash"}))
 
 func _input(event: InputEvent):
 	if not is_connected or not (my_player_data is Dictionary) or _get_safe_bool(my_player_data, "dead", false):
@@ -427,6 +453,22 @@ func _process(delta):
 			$UI/HUD/ChatBox/ChatInput.grab_focus()
 			is_chatting = true
 			
+	# Process Dash Keyboard Input & Cooldown UI
+	if client_dash_cooldown > 0:
+		client_dash_cooldown -= delta
+		var db = $UI/HUD.get_node_or_null("DashButton")
+		if db:
+			db.text = "⚡ " + str(snapped(client_dash_cooldown, 0.1)) + "s"
+			db.disabled = true
+	else:
+		var db = $UI/HUD.get_node_or_null("DashButton")
+		if db:
+			db.text = "⚡ DASH"
+			db.disabled = false
+			
+	if not is_chatting and (Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_SHIFT)):
+		_on_dash_pressed()
+			
 	# 5. Process Visual FX (texts, particles)
 	_update_visual_effects(delta)
 	
@@ -681,6 +723,23 @@ func _handle_server_message(data: Dictionary):
 			var killer = _get_safe_string(data, "killer_name", "")
 			var victim = _get_safe_string(data, "victim_name", "")
 			add_chat_message("KILL", killer + " 🏹 killed 💀 " + victim)
+			
+		"effect":
+			var eff_type = _get_safe_string(data, "effect_type", "")
+			if eff_type == "bomb":
+				var e_pos = Vector2(_get_safe_float(data, "effect_x", 0.0), _get_safe_float(data, "effect_y", 0.0))
+				screen_shake = 20.0
+				if hit_sparks.size() < 120:
+					for i in range(30):
+						var speed = randf_range(150, 450)
+						var angle = randf_range(0, TAU)
+						hit_sparks.append({
+							"pos": e_pos,
+							"vel": Vector2(cos(angle), sin(angle)) * speed,
+							"color": Color(1.0, randf_range(0.3, 0.7), 0.1),
+							"life": randf_range(0.3, 0.8),
+							"size": randf_range(4.0, 10.0)
+						})
 			
 		"game_over":
 			var winner = _get_safe_string(data, "winner_team", "")
@@ -937,7 +996,8 @@ func _on_world_draw():
 		var angle_rot = time_ms * 0.003 + phase
 		var final_pos = g_pos + float_offset
 		
-		if _get_safe_string(g, "type", "xp") == "hp":
+		var gem_type = _get_safe_string(g, "type", "xp")
+		if gem_type == "hp":
 			# Glowing red base shadow
 			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(1.0, 0.2, 0.2, 0.18))
 			# HP: spinning cross
@@ -951,6 +1011,36 @@ func _on_world_draw():
 				rotated_pts.append(final_pos + pt.rotated(angle_rot))
 			world_node.draw_colored_polygon(rotated_pts, Color(1.0, 0.3, 0.3))
 			world_node.draw_polyline(rotated_pts, Color(1.0, 0.85, 0.85), 1.5)
+		elif gem_type == "bomb":
+			world_node.draw_circle(g_pos + Vector2(0, 8), 10.0, Color(0.2, 0.2, 0.2, 0.3))
+			world_node.draw_circle(final_pos, 9.0, Color(0.15, 0.15, 0.15))
+			world_node.draw_circle(final_pos - Vector2(3, 4), 3.0, Color(1.0, 0.4, 0.1)) # bomb spark
+		elif gem_type == "mushroom":
+			world_node.draw_circle(g_pos + Vector2(0, 8), 10.0, Color(0.8, 0.3, 0.8, 0.3))
+			world_node.draw_circle(final_pos + Vector2(0, 3), 5.0, Color(0.9, 0.9, 0.9)) # stem
+			world_node.draw_arc(final_pos, 8.0, PI, TAU, 16, Color(0.8, 0.2, 0.3), 8.0) # cap
+		elif gem_type == "star":
+			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(1.0, 0.9, 0.2, 0.3))
+			var raw_pts = [
+				Vector2(0, -10), Vector2(3, -3), Vector2(10, -3), Vector2(4, 2),
+				Vector2(6, 10), Vector2(0, 5), Vector2(-6, 10), Vector2(-4, 2),
+				Vector2(-10, -3), Vector2(-3, -3)
+			]
+			var rotated_pts = PackedVector2Array()
+			for pt in raw_pts:
+				rotated_pts.append(final_pos + pt.rotated(angle_rot))
+			world_node.draw_colored_polygon(rotated_pts, Color(1.0, 0.9, 0.2))
+			world_node.draw_polyline(rotated_pts, Color(1.0, 1.0, 0.8), 1.5)
+		elif gem_type == "haste":
+			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(0.3, 0.8, 1.0, 0.3))
+			var raw_pts = [
+				Vector2(2, -10), Vector2(-4, 0), Vector2(2, 0), Vector2(-2, 10),
+				Vector2(6, -2), Vector2(0, -2)
+			]
+			var rotated_pts = PackedVector2Array()
+			for pt in raw_pts:
+				rotated_pts.append(final_pos + pt.rotated(angle_rot))
+			world_node.draw_colored_polygon(rotated_pts, Color(0.2, 0.7, 1.0))
 		else:
 			# Glowing green base shadow
 			world_node.draw_circle(g_pos + Vector2(0, 8), 7.0, Color(0.2, 0.9, 0.4, 0.18))
@@ -1000,14 +1090,14 @@ func _on_world_draw():
 		elif is_poison:
 			arrow_color = Color(0.75, 0.15, 0.9) # Acid purple
 		
-		# Draw trailing plasma beam glow
-		var trail_length = 26.0
+		# Draw trailing plasma beam glow (Enhanced Ion Trails)
+		var trail_length = 35.0
 		var back_p = p_pos - vel * trail_length
 		
-		# Wider soft glow
-		world_node.draw_line(back_p - vel * 4.0, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.2), 6.0)
-		# Solid core line
-		world_node.draw_line(back_p, p_pos, arrow_color, 2.5)
+		# Multiple glowing ion layers for rich plasma effect
+		world_node.draw_line(back_p - vel * 10.0, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.15), 12.0)
+		world_node.draw_line(back_p, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.4), 6.0)
+		world_node.draw_line(back_p + vel * 10.0, p_pos, arrow_color, 2.5)
 		
 		var head_angle = vel.angle()
 		if is_ice:
@@ -1038,14 +1128,15 @@ func _on_world_draw():
 			world_node.draw_circle(p_pos - vel * 12.0, 2.5, Color(0.5, 0.0, 0.8))
 			world_node.draw_circle(p_pos, 2.0, Color.WHITE)
 		else:
-			# Normal arrow head
-			var pts = PackedVector2Array([
-				p_pos,
-				p_pos + Vector2(cos(head_angle + 2.5), sin(head_angle + 2.5)) * 8.5,
-				p_pos + Vector2(cos(head_angle - 2.5), sin(head_angle - 2.5)) * 8.5
-			])
-			world_node.draw_colored_polygon(pts, arrow_color)
-			world_node.draw_circle(p_pos - vel * 2.0, 2.0, Color.WHITE)
+			# Energetic Ion Core Head
+			world_node.draw_circle(p_pos, 7.0, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.4))
+			world_node.draw_circle(p_pos, 4.0, arrow_color)
+			world_node.draw_circle(p_pos, 2.0, Color.WHITE)
+			
+			# Little ion sparks trailing
+			var spark_offset = vel.orthogonal() * 6.0 * sin(time_ms * 0.05 + float(proj_id.hash() % 100))
+			world_node.draw_circle(p_pos - vel * 10.0 + spark_offset, 2.0, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.8))
+			world_node.draw_circle(p_pos - vel * 18.0 - spark_offset, 1.5, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.5))
 
 	# 7. Draw Towers & Core Bases (Pulsing base orbs, rotating cyber shields, range rings)
 	var towers_list = _get_safe_array(game_state, "towers")
@@ -1220,6 +1311,21 @@ func _on_world_draw():
 		# Breathing size oscillation
 		var breath = 1.0 + 0.05 * sin(time_ms * 0.005 + float(p_id.hash() % 100)*0.1)
 		var base_r = 22.0 * breath
+		
+		var is_giant = _get_safe_float(p, "giant_timer", 0.0) > 0.0
+		var is_invincible = _get_safe_float(p, "invincible_timer", 0.0) > 0.0
+		var is_haste = _get_safe_float(p, "haste_timer", 0.0) > 0.0
+		
+		if is_giant:
+			base_r *= 1.8
+		
+		if is_haste:
+			world_node.draw_circle(p_pos, base_r + 12.0, Color(1.0, 0.9, 0.2, 0.3 + 0.2 * sin(time_ms * 0.03)))
+			
+		if is_invincible:
+			var inv_col = Color.from_hsv(fmod(time_ms * 0.002, 1.0), 0.8, 1.0, p_alpha)
+			col = inv_col
+			acc = inv_col
 		
 		# Soft drop shadow
 		world_node.draw_circle(p_pos + Vector2(0, 6), base_r * 0.9, Color(0, 0, 0, p_alpha * 0.28))
