@@ -13,8 +13,6 @@ import (
 type Room struct {
 	ID          string
 	Players     map[string]*Player
-	Minions     map[string]*Minion
-	Towers      map[string]*Tower
 	Projectiles map[string]*Projectile
 	Gems        map[string]*Gem
 	Walls       []Wall
@@ -27,8 +25,6 @@ type Room struct {
 	
 	blueBaseHP  float64
 	redBaseHP   float64
-	blueTowerHP float64
-	redTowerHP  float64
 
 	spawnTimer  float64
 	gemTimer    float64
@@ -44,8 +40,6 @@ func NewRoom(id string) *Room {
 	r := &Room{
 		ID:          id,
 		Players:     make(map[string]*Player),
-		Minions:     make(map[string]*Minion),
-		Towers:      make(map[string]*Tower),
 		Projectiles: make(map[string]*Projectile),
 		Gems:        make(map[string]*Gem),
 		Walls:       make([]Wall, 0),
@@ -77,42 +71,7 @@ func (r *Room) initMap() {
 		{X: 1780, Y: 550, Width: 120, Height: 100},
 	}
 
-	// 2. Setup Towers
-	// Blue Team
-	r.Towers["blue_base"] = &Tower{
-		ID:       "blue_base",
-		Team:     "blue",
-		Position: Vector2{X: 150, Y: 600},
-		HP:       5000,
-		MaxHP:    5000,
-		IsBase:   true,
-	}
-	r.Towers["blue_tower1"] = &Tower{
-		ID:       "blue_tower1",
-		Team:     "blue",
-		Position: Vector2{X: 850, Y: 600},
-		HP:       2500,
-		MaxHP:    2500,
-		IsBase:   false,
-	}
-
-	// Red Team
-	r.Towers["red_base"] = &Tower{
-		ID:       "red_base",
-		Team:     "red",
-		Position: Vector2{X: 2850, Y: 600},
-		HP:       5000,
-		MaxHP:    5000,
-		IsBase:   true,
-	}
-	r.Towers["red_tower1"] = &Tower{
-		ID:       "red_tower1",
-		Team:     "red",
-		Position: Vector2{X: 2150, Y: 600},
-		HP:       2500,
-		MaxHP:    2500,
-		IsBase:   false,
-	}
+	// No towers in FFA Mode
 	
 	// Initial XP Gems
 	for i := 0; i < 25; i++ {
@@ -155,11 +114,10 @@ func (r *Room) Start() {
 				if ticks%150 == 0 {
 					r.mu.Lock()
 					numPlayers := len(r.Players)
-					numMinions := len(r.Minions)
 					numProjectiles := len(r.Projectiles)
 					numGems := len(r.Gems)
 					r.mu.Unlock()
-					log.Printf("Room %s status: %d players, %d minions, %d projectiles, %d gems. Loop is running smoothly.", r.ID, numPlayers, numMinions, numProjectiles, numGems)
+					log.Printf("Room %s status: %d players, %d projectiles, %d gems. Loop is running smoothly.", r.ID, numPlayers, numProjectiles, numGems)
 				}
 			}
 		}
@@ -219,27 +177,22 @@ func (r *Room) handleRegister(p *Player) {
 
 	log.Printf("Registering player ID: %s, Name: %s, Hero: %s", p.ID, p.Name, p.Hero)
 
-	// Assign balanced team
-	blueCount, redCount := 0, 0
-	for _, pl := range r.Players {
-		if pl.Team == "blue" {
-			blueCount++
-		} else {
-			redCount++
-		}
-	}
-	
-	if blueCount <= redCount {
-		p.Team = "blue"
-	} else {
-		p.Team = "red"
-	}
+	// Free-For-All: Everyone is their own team
+	p.Team = p.ID
 
-	// Kick an AI bot on the same team to free up a slot for the human player
+	// Kick an AI bot to free up a slot for the human player, keep max 10 players total
 	var botToKick *Player
-	for _, pl := range r.Players {
-		if pl.IsBot && pl.Team == p.Team {
-			botToKick = pl
+	for len(r.Players) >= 10 {
+		for _, pl := range r.Players {
+			if pl.IsBot {
+				botToKick = pl
+				break
+			}
+		}
+		if botToKick != nil {
+			delete(r.Players, botToKick.ID)
+			botToKick = nil
+		} else {
 			break
 		}
 	}
@@ -247,9 +200,6 @@ func (r *Room) handleRegister(p *Player) {
 	initPlayerStats(p, p.Hero)
 	r.respawnPlayer(p)
 	
-	if botToKick != nil {
-		delete(r.Players, botToKick.ID)
-	}
 	r.Players[p.ID] = p
 
 	// Send init message
@@ -268,11 +218,7 @@ func (r *Room) handleRegister(p *Player) {
 	}
 
 	// Chat broadcast join
-	if botToKick != nil {
-		r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the %s team (replaced AI %s)!", p.Name, p.Hero, p.Team, botToKick.Name))
-	} else {
-		r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the %s team!", p.Name, p.Hero, p.Team))
-	}
+	r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the arena!", p.Name, p.Hero))
 }
 
 func (r *Room) handleUnregister(p *Player) {
@@ -283,7 +229,7 @@ func (r *Room) handleUnregister(p *Player) {
 		delete(r.Players, p.ID)
 		r.broadcastChat("system", fmt.Sprintf("%s has left the game.", p.Name))
 		
-		// Fill room with bots to keep the match 3v3
+		// Fill room with bots to keep the match busy
 		r.fillRoomWithBots()
 	}
 }
@@ -319,16 +265,9 @@ func (r *Room) handlePlayerInput(playerID string, msg ClientMessage) {
 func (r *Room) respawnPlayer(p *Player) {
 	p.Dead = false
 	p.HP = p.MaxHP
-	if p.Team == "blue" {
-		p.Position = Vector2{
-			X: 100 + rand.Float64()*150,
-			Y: 450 + rand.Float64()*300,
-		}
-	} else {
-		p.Position = Vector2{
-			X: 2750 + rand.Float64()*150,
-			Y: 450 + rand.Float64()*300,
-		}
+	p.Position = Vector2{
+		X: 100 + rand.Float64()*(MapWidth-200),
+		Y: 100 + rand.Float64()*(MapHeight-200),
 	}
 }
 
@@ -340,17 +279,9 @@ func (r *Room) nextID(prefix string) string {
 func (r *Room) spawnGem(gemType string) {
 	id := r.nextID("gem")
 	
-	// Spawn more gems towards the center of the lane
-	var x, y float64
-	if gemType == "hp" {
-		// HP gems are rarer and spread out
-		x = 300 + rand.Float64()*(MapWidth-600)
-		y = 100 + rand.Float64()*(MapHeight-200)
-	} else {
-		// XP gems center in the active push zones
-		x = 500 + rand.Float64()*(MapWidth-1000)
-		y = 100 + rand.Float64()*(MapHeight-200)
-	}
+	// Spawn anywhere on the map evenly
+	x := 100 + rand.Float64()*(MapWidth-200)
+	y := 100 + rand.Float64()*(MapHeight-200)
 
 	g := &Gem{
 		ID:       id,
@@ -364,36 +295,6 @@ func (r *Room) spawnGem(gemType string) {
 	r.Gems[id] = g
 }
 
-func (r *Room) spawnMinionWave() {
-	// Spawns 3 minions at Blue Base, 3 at Red Base
-	for i := 0; i < 3; i++ {
-		blueID := r.nextID("minion_b")
-		r.Minions[blueID] = &Minion{
-			ID:       blueID,
-			Team:     "blue",
-			Position: Vector2{X: 150 + rand.Float64()*40, Y: 500 + float64(i)*80},
-			HP:       300,
-			MaxHP:    300,
-			Speed:    100,
-			TargetX:  2850,
-			TargetY:  600,
-			State:    "march",
-		}
-		
-		redID := r.nextID("minion_r")
-		r.Minions[redID] = &Minion{
-			ID:       redID,
-			Team:     "red",
-			Position: Vector2{X: 2850 - rand.Float64()*40, Y: 500 + float64(i)*80},
-			HP:       300,
-			MaxHP:    300,
-			Speed:    100,
-			TargetX:  150,
-			TargetY:  600,
-			State:    "march",
-		}
-	}
-}
 
 func (r *Room) playerShoot(p *Player, baseAngle float64) {
 	if p.ShootCooldown > 0 {
@@ -511,12 +412,6 @@ func (r *Room) tick(dt float64) {
 	r.spawnTimer += dt
 	r.gemTimer += dt
 	
-	// Spawn Minions every 20 seconds
-	if r.spawnTimer >= 20.0 {
-		r.spawnMinionWave()
-		r.spawnTimer = 0.0
-	}
-	
 	// Spawn XP/HP Gems if below cap
 	if r.gemTimer >= 4.0 {
 		if len(r.Gems) < 50 {
@@ -597,9 +492,15 @@ func (r *Room) tick(dt float64) {
 		}
 		
 		// Update position
-		if p.Moving {
-			p.Position.X += p.MoveDir.X * p.Speed * speedMultiplier * dt
-			p.Position.Y += p.MoveDir.Y * p.Speed * speedMultiplier * dt
+		isDashing := p.DashTimer > 0
+		if p.Moving || isDashing {
+			moveX, moveY := p.MoveDir.X, p.MoveDir.Y
+			if isDashing && moveX == 0 && moveY == 0 {
+				moveX = math.Cos(p.Angle)
+				moveY = math.Sin(p.Angle)
+			}
+			p.Position.X += moveX * p.Speed * speedMultiplier * dt
+			p.Position.Y += moveY * p.Speed * speedMultiplier * dt
 			
 			// Stay within borders
 			if p.Position.X < 20 { p.Position.X = 20 }
@@ -617,130 +518,6 @@ func (r *Room) tick(dt float64) {
 			if nearestEnemy != nil {
 				angle := math.Atan2(nearestEnemy.Y - p.Position.Y, nearestEnemy.X - p.Position.X)
 				r.playerShoot(p, angle)
-			}
-		}
-	}
-
-	// Update Minions
-	for mID, m := range r.Minions {
-		if m.HP <= 0 {
-			delete(r.Minions, mID)
-			continue
-		}
-		
-		// Tick elemental debuffs
-		if m.FireTimer > 0 {
-			m.FireTimer -= dt
-			m.HP -= 15.0 * dt
-		}
-		if m.PoisonTimer > 0 {
-			m.PoisonTimer -= dt
-			m.HP -= 8.0 * dt
-		}
-		
-		minionSpeedMultiplier := 1.0
-		if m.IceTimer > 0 {
-			m.IceTimer -= dt
-			minionSpeedMultiplier = 0.55
-		}
-		
-		if m.Cooldown > 0 {
-			m.Cooldown -= dt
-		}
-
-		// Minion AI: search for nearby enemies to attack, else march
-		enemy, dist := r.findNearestEnemy(m.Position, m.Team, 350.0)
-		if enemy != nil {
-			m.State = "attack"
-			m.TargetX = enemy.X
-			m.TargetY = enemy.Y
-			
-			// Attack if in range (melee/close range)
-			if dist <= 60.0 {
-				if m.Cooldown <= 0 {
-					r.damageEntityAt(m.TargetX, m.TargetY, 20.0, m.Team, "minion")
-					m.Cooldown = 1.0 // 1s attack CD
-				}
-				// Don't move if already attacking
-				continue
-			}
-		} else {
-			m.State = "march"
-			// Pathing towards opposing base or first tower
-			targTower := r.findNextTowerTarget(m.Team)
-			if targTower != nil {
-				m.TargetX = targTower.Position.X
-				m.TargetY = targTower.Position.Y
-			} else {
-				if m.Team == "blue" {
-					m.TargetX = 2850
-					m.TargetY = 600
-				} else {
-					m.TargetX = 150
-					m.TargetY = 600
-				}
-			}
-		}
-
-		// Move minion
-		dx := m.TargetX - m.Position.X
-		dy := m.TargetY - m.Position.Y
-		d := math.Sqrt(dx*dx + dy*dy)
-		if d > 5 {
-			m.Position.X += (dx / d) * m.Speed * minionSpeedMultiplier * dt
-			m.Position.Y += (dy / d) * m.Speed * minionSpeedMultiplier * dt
-			
-			r.resolveWallCollisions(&m.Position, 20.0)
-		}
-	}
-
-	// Update Towers
-	for tID, t := range r.Towers {
-		if t.HP <= 0 {
-			r.broadcastChat("system", fmt.Sprintf("The %s %s was destroyed!", t.Team, t.ID))
-			delete(r.Towers, tID)
-			
-			// Victory Check
-			if t.IsBase {
-				winner := "red"
-				if t.Team == "red" {
-					winner = "blue"
-				}
-				r.endGame(winner)
-			}
-			continue
-		}
-		
-		if t.Cooldown > 0 {
-			t.Cooldown -= dt
-		}
-		
-		// Towers shoot at nearest enemy in range
-		if t.Cooldown <= 0 {
-			rangeLimit := 400.0
-			if t.IsBase { rangeLimit = 550.0 }
-			
-			target, _ := r.findNearestEnemy(t.Position, t.Team, rangeLimit)
-			if target != nil {
-				// Fire tower projectile
-				projID := r.nextID("proj")
-				angle := math.Atan2(target.Y - t.Position.Y, target.X - t.Position.X)
-				dx := math.Cos(angle)
-				dy := math.Sin(angle)
-				
-				r.Projectiles[projID] = &Projectile{
-					ID:        projID,
-					OwnerID:   t.ID,
-					OwnerType: "tower",
-					Team:      t.Team,
-					Position:  t.Position,
-					Velocity:  Vector2{X: dx * 500, Y: dy * 500},
-					Damage:    40.0,
-					Life:      1.5,
-					Bounces:   0,
-					Pierces:   0,
-				}
-				t.Cooldown = 1.5 // Tower shoots once per 1.5s
 			}
 		}
 	}
@@ -890,28 +667,6 @@ func (r *Room) triggerExplosion(x, y, radius, damage float64, safeTeam string) {
 			r.damagePlayer(p, damage, "")
 		}
 	}
-	// Damage minions
-	for _, m := range r.Minions {
-		if m.Team == safeTeam {
-			continue
-		}
-		dx := m.Position.X - x
-		dy := m.Position.Y - y
-		if math.Sqrt(dx*dx + dy*dy) <= radius {
-			m.HP -= damage
-		}
-	}
-	// Damage towers
-	for _, t := range r.Towers {
-		if t.Team == safeTeam {
-			continue
-		}
-		dx := t.Position.X - x
-		dy := t.Position.Y - y
-		if math.Sqrt(dx*dx + dy*dy) <= radius {
-			t.HP -= damage
-		}
-	}
 }
 
 func (r *Room) broadcastEffect(effectType string, x, y float64) {
@@ -975,91 +730,21 @@ func (r *Room) checkProjectileHit(proj *Projectile) {
 	targetHit := false
 	
 	// Hit Players
-	if proj.OwnerType != "player" { // Hit enemy player
-		for _, enemy := range r.Players {
-			if enemy.Dead || enemy.Team == proj.Team {
-				continue
-			}
-			dx := proj.Position.X - enemy.Position.X
-			dy := proj.Position.Y - enemy.Position.Y
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < 25.0 {
-				r.damagePlayer(enemy, proj.Damage, proj.OwnerID)
-				r.applyProjectileEffects(proj.Effects, enemy, nil)
-				targetHit = true
-				break
-			}
+	for _, enemy := range r.Players {
+		if enemy.Dead || enemy.Team == proj.Team {
+			continue
 		}
-	} else { // Projectile owner is player, can hit enemy players, minions, and towers
-		// Hit players
-		for _, enemy := range r.Players {
-			if enemy.Dead || enemy.Team == proj.Team {
-				continue
-			}
-			dx := proj.Position.X - enemy.Position.X
-			dy := proj.Position.Y - enemy.Position.Y
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < 25.0 {
-				r.damagePlayer(enemy, proj.Damage, proj.OwnerID)
-				r.applyProjectileEffects(proj.Effects, enemy, nil)
-				targetHit = true
-				break
-			}
+		if enemy.InvincibleTimer > 0 {
+			continue // Invincible to projectiles
 		}
-	}
-
-	// Hit Minions
-	if !targetHit {
-		for _, m := range r.Minions {
-			if m.Team == proj.Team {
-				continue
-			}
-			dx := proj.Position.X - m.Position.X
-			dy := proj.Position.Y - m.Position.Y
-			dist := math.Sqrt(dx*dx + dy*dy)
-			if dist < 20.0 {
-				m.HP -= proj.Damage
-				r.applyProjectileEffects(proj.Effects, nil, m)
-				if m.HP <= 0 {
-					// Award XP to player who hit
-					if proj.OwnerType == "player" {
-						if p, ok := r.Players[proj.OwnerID]; ok {
-							p.Score += 10
-							// Spawn XP gem at minion location
-							gID := r.nextID("gem")
-							r.Gems[gID] = &Gem{
-								ID:       gID,
-								Position: m.Position,
-								XPValue:  25,
-								Type:     "xp",
-							}
-						}
-					}
-				}
-				targetHit = true
-				break
-			}
-		}
-	}
-
-	// Hit Towers/Bases
-	if !targetHit {
-		for _, t := range r.Towers {
-			if t.Team == proj.Team {
-				continue
-			}
-			dx := proj.Position.X - t.Position.X
-			dy := proj.Position.Y - t.Position.Y
-			dist := math.Sqrt(dx*dx + dy*dy)
-			
-			hitRadius := 45.0
-			if t.IsBase { hitRadius = 80.0 }
-			
-			if dist < hitRadius {
-				t.HP -= proj.Damage
-				targetHit = true
-				break
-			}
+		dx := proj.Position.X - enemy.Position.X
+		dy := proj.Position.Y - enemy.Position.Y
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist < 25.0 {
+			r.damagePlayer(enemy, proj.Damage, proj.OwnerID)
+			r.applyProjectileEffects(proj.Effects, enemy)
+			targetHit = true
+			break
 		}
 	}
 
@@ -1117,34 +802,6 @@ func (r *Room) damageEntityAt(x, y float64, dmg float64, team string, attackerTy
 			return
 		}
 	}
-
-	for _, m := range r.Minions {
-		if m.Team == team {
-			continue
-		}
-		dx := m.Position.X - x
-		dy := m.Position.Y - y
-		if math.Sqrt(dx*dx + dy*dy) < 25.0 {
-			m.HP -= dmg
-			return
-		}
-	}
-
-	for _, t := range r.Towers {
-		if t.Team == team {
-			continue
-		}
-		dx := t.Position.X - x
-		dy := t.Position.Y - y
-		
-		hitRadius := 50.0
-		if t.IsBase { hitRadius = 90.0 }
-		
-		if math.Sqrt(dx*dx + dy*dy) < hitRadius {
-			t.HP -= dmg
-			return
-		}
-	}
 }
 
 func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*Vector2, float64) {
@@ -1156,6 +813,9 @@ func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*
 		if p.Dead || p.Team == team {
 			continue
 		}
+		if p.InvincibleTimer > 0 {
+			continue // Don't target invincible players automatically
+		}
 		dx := p.Position.X - pos.X
 		dy := p.Position.Y - pos.Y
 		distSq := dx*dx + dy*dy
@@ -1165,59 +825,13 @@ func (r *Room) findNearestEnemy(pos Vector2, team string, rangeLimit float64) (*
 		}
 	}
 	
-	// Check Minions
-	for _, m := range r.Minions {
-		if m.Team == team {
-			continue
-		}
-		dx := m.Position.X - pos.X
-		dy := m.Position.Y - pos.Y
-		distSq := dx*dx + dy*dy
-		if distSq < minDistSq {
-			minDistSq = distSq
-			nearest = &Vector2{X: m.Position.X, Y: m.Position.Y}
-		}
-	}
-	
-	// Check Towers
-	for _, t := range r.Towers {
-		if t.Team == team {
-			continue
-		}
-		dx := t.Position.X - pos.X
-		dy := t.Position.Y - pos.Y
-		distSq := dx*dx + dy*dy
-		if distSq < minDistSq {
-			minDistSq = distSq
-			nearest = &Vector2{X: t.Position.X, Y: t.Position.Y}
-		}
-	}
-	
 	if nearest != nil {
 		return nearest, math.Sqrt(minDistSq)
 	}
 	return nil, rangeLimit
 }
 
-func (r *Room) findNextTowerTarget(team string) *Tower {
-	enemyTeam := "red"
-	if team == "red" {
-		enemyTeam = "blue"
-	}
-	
-	// Search outer towers first, then base
-	t1, ok1 := r.Towers[enemyTeam+"_tower1"]
-	if ok1 && t1.HP > 0 {
-		return t1
-	}
-	
-	base, ok2 := r.Towers[enemyTeam+"_base"]
-	if ok2 && base.HP > 0 {
-		return base
-	}
-	
-	return nil
-}
+
 
 func (r *Room) resolveWallCollisions(pos *Vector2, radius float64) {
 	for _, w := range r.Walls {
@@ -1257,9 +871,7 @@ func (r *Room) endGame(winner string) {
 		defer r.mu.Unlock()
 		
 		r.Projectiles = make(map[string]*Projectile)
-		r.Minions = make(map[string]*Minion)
 		r.Gems = make(map[string]*Gem)
-		r.Towers = make(map[string]*Tower)
 		
 		r.initMap()
 		
@@ -1303,20 +915,12 @@ func (r *Room) broadcastKillFeed(killer, victim string) {
 func (r *Room) sendStateToAll() {
 	state := &GameStateMessage{
 		Players:     make([]*Player, 0, len(r.Players)),
-		Minions:     make([]*Minion, 0, len(r.Minions)),
-		Towers:      make([]*Tower, 0, len(r.Towers)),
 		Projectiles: make([]*Projectile, 0, len(r.Projectiles)),
 		Gems:        make([]*Gem, 0, len(r.Gems)),
 	}
 
 	for _, p := range r.Players {
 		state.Players = append(state.Players, p)
-	}
-	for _, m := range r.Minions {
-		state.Minions = append(state.Minions, m)
-	}
-	for _, t := range r.Towers {
-		state.Towers = append(state.Towers, t)
 	}
 	for _, pr := range r.Projectiles {
 		state.Projectiles = append(state.Projectiles, pr)
@@ -1347,7 +951,7 @@ func (r *Room) broadcast(data []byte) {
 	}
 }
 
-func (r *Room) applyProjectileEffects(effects []string, playerTarget *Player, minionTarget *Minion) {
+func (r *Room) applyProjectileEffects(effects []string, playerTarget *Player) {
 	for _, eff := range effects {
 		if playerTarget != nil {
 			switch eff {
@@ -1357,15 +961,6 @@ func (r *Room) applyProjectileEffects(effects []string, playerTarget *Player, mi
 				playerTarget.IceTimer = 2.5
 			case "poison":
 				playerTarget.PoisonTimer = 5.0
-			}
-		} else if minionTarget != nil {
-			switch eff {
-			case "fire":
-				minionTarget.FireTimer = 3.0
-			case "ice":
-				minionTarget.IceTimer = 2.5
-			case "poison":
-				minionTarget.PoisonTimer = 5.0
 			}
 		}
 	}
@@ -1453,28 +1048,33 @@ func (r *Room) updateBotAI(p *Player, dt float64) {
 			}
 		}
 	} else {
-		// 2. Marching: push the lane
-		targTower := r.findNextTowerTarget(p.Team)
-		var targX, targY float64
-		if targTower != nil {
-			targX = targTower.Position.X
-			targY = targTower.Position.Y
-		} else {
-			if p.Team == "blue" {
-				targX = 2850
-				targY = 600
-			} else {
-				targX = 150
-				targY = 600
+		// 2. Searching for gems
+		var nearestGem *Gem
+		minDist := 100000.0
+		for _, g := range r.Gems {
+			dx := g.Position.X - p.Position.X
+			dy := g.Position.Y - p.Position.Y
+			dSq := dx*dx + dy*dy
+			if dSq < minDist {
+				minDist = dSq
+				nearestGem = g
 			}
 		}
-		
-		dx := targX - p.Position.X
-		dy := targY - p.Position.Y
-		d := math.Sqrt(dx*dx + dy*dy)
-		if d > 10 {
-			moveDir = Vector2{X: dx / d, Y: dy / d}
-			p.Angle = math.Atan2(dy, dx)
+
+		if nearestGem != nil {
+			dx := nearestGem.Position.X - p.Position.X
+			dy := nearestGem.Position.Y - p.Position.Y
+			d := math.Sqrt(dx*dx + dy*dy)
+			if d > 10 {
+				moveDir = Vector2{X: dx / d, Y: dy / d}
+				p.Angle = math.Atan2(dy, dx)
+			}
+		} else {
+			// Wander randomly
+			moveDir = Vector2{
+				X: (rand.Float64() - 0.5),
+				Y: (rand.Float64() - 0.5),
+			}
 		}
 	}
 	

@@ -153,6 +153,23 @@ func _ready():
 	
 	# Initial window setup
 	get_viewport().files_dropped.connect(func(files): pass)
+	
+	# Add Glow Effects for Ion visuals
+	var env = Environment.new()
+	env.background_mode = Environment.BG_CANVAS
+	env.glow_enabled = true
+	env.set("glow_levels/1", 1.0)
+	env.set("glow_levels/2", 1.0)
+	env.set("glow_levels/3", 1.0)
+	env.set("glow_levels/4", 0.5)
+	env.set("glow_levels/5", 0.5)
+	env.glow_intensity = 1.5
+	env.glow_strength = 1.2
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.glow_hdr_threshold = 0.5
+	var we = WorldEnvironment.new()
+	we.environment = env
+	add_child(we)
 
 func _on_dash_pressed():
 	if client_dash_cooldown <= 0 and is_connected and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
@@ -884,10 +901,10 @@ func _update_scoreboard():
 		if count >= 6: break
 		
 		var p_name = _get_safe_string(p, "name", "Archer")
-		var p_team = _get_safe_string(p, "team", "blue")
+		var p_id = _get_safe_string(p, "id", "")
 		var p_score = _get_safe_int(p, "score", 0)
 		var p_level = _get_safe_int(p, "level", 1)
-		var text_val = p_name + " (" + p_team.to_upper() + "): " + str(p_score) + " (Lvl " + str(p_level) + ")"
+		var text_val = p_name + ": " + str(p_score) + " (Lvl " + str(p_level) + ")"
 		
 		var l: Label
 		if count < existing_count:
@@ -898,7 +915,7 @@ func _update_scoreboard():
 			list_container.add_child(l)
 			
 		l.text = text_val
-		if p_team == "blue":
+		if p_id == client_id:
 			l.add_theme_color_override("font_color", Color(0.4, 0.6, 1.0))
 		else:
 			l.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
@@ -1138,125 +1155,7 @@ func _on_world_draw():
 			world_node.draw_circle(p_pos - vel * 10.0 + spark_offset, 2.0, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.8))
 			world_node.draw_circle(p_pos - vel * 18.0 - spark_offset, 1.5, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.5))
 
-	# 7. Draw Towers & Core Bases (Pulsing base orbs, rotating cyber shields, range rings)
-	var towers_list = _get_safe_array(game_state, "towers")
-	for t in towers_list:
-		if not (t is Dictionary): continue
-		var t_pos = _get_safe_vector2(t, "pos")
-		var t_team = _get_safe_string(t, "team", "blue")
-		var t_color = Color(0.3, 0.5, 1.0) if t_team == "blue" else Color(1.0, 0.3, 0.3)
-		var range_color = Color(0.3, 0.5, 1.0, 0.08) if t_team == "blue" else Color(1.0, 0.3, 0.3, 0.08)
-		
-		if t_pos.distance_to(cam_pos) > 950.0:
-			continue
-			
-		var shield_angle = time_ms * 0.0012 if t_team == "blue" else -time_ms * 0.0012
-		var pulse_scale = 1.0 + 0.05 * sin(time_ms * 0.006 + (t_pos.x * 0.01))
-		
-		if _get_safe_bool(t, "is_base", false):
-			# Base HP bar
-			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -95), _get_safe_float(t, "hp", 0.0), _get_safe_float(t, "max_hp", 1.0), 150, 12)
-			
-			# Range circle (Optimized: single continuous circle draw_arc instead of 24 loops)
-			var range_rad = 550.0
-			world_node.draw_circle(t_pos, range_rad, range_color)
-			world_node.draw_arc(t_pos, range_rad, 0.0, TAU, 48, t_color * Color(1.0, 1.0, 1.0, 0.3), 1.5)
-			
-			# Octagonal outer neon structure
-			var base_radius = 80.0 * pulse_scale
-			var pts = PackedVector2Array()
-			for i in range(8):
-				var a = i * (PI / 4) + shield_angle * 0.3
-				pts.append(t_pos + Vector2(cos(a), sin(a)) * base_radius)
-			world_node.draw_colored_polygon(pts, Color(0.06, 0.09, 0.12, 0.9))
-			world_node.draw_polyline(pts, t_color, 4.0)
-			
-			# Rotating vector shield lines
-			var tri_pts = PackedVector2Array([
-				t_pos + Vector2(cos(shield_angle), sin(shield_angle)) * 60,
-				t_pos + Vector2(cos(shield_angle + 2.0), sin(shield_angle + 2.0)) * 60,
-				t_pos + Vector2(cos(shield_angle + 4.0), sin(shield_angle + 4.0)) * 60
-			])
-			world_node.draw_polyline(tri_pts, t_color * Color(1, 1, 1, 0.45), 2.5)
-			
-			# Core orb
-			world_node.draw_circle(t_pos, 32.0 * pulse_scale, t_color)
-			world_node.draw_circle(t_pos, 16.0 * pulse_scale, Color.WHITE)
-		else:
-			# HP bar
-			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -60), _get_safe_float(t, "hp", 0.0), _get_safe_float(t, "max_hp", 1.0), 80, 8)
-			
-			# Range circle (Optimized: single continuous circle draw_arc instead of 16 loops)
-			var range_rad = 400.0
-			world_node.draw_circle(t_pos, range_rad, range_color)
-			world_node.draw_arc(t_pos, range_rad, 0.0, TAU, 36, t_color * Color(1.0, 1.0, 1.0, 0.3), 1.2)
-			
-			# Tower metal shell (Square/diamond protective grid)
-			var base_size = 40.0 * pulse_scale
-			var tower_pts = PackedVector2Array([
-				t_pos + Vector2(-base_size, -base_size).rotated(shield_angle * 0.25),
-				t_pos + Vector2(base_size, -base_size).rotated(shield_angle * 0.25),
-				t_pos + Vector2(base_size, base_size).rotated(shield_angle * 0.25),
-				t_pos + Vector2(-base_size, base_size).rotated(shield_angle * 0.25)
-			])
-			world_node.draw_colored_polygon(tower_pts, Color(0.06, 0.08, 0.12, 0.95))
-			world_node.draw_polyline(tower_pts, t_color * Color(1, 1, 1, 0.6), 3.0)
-			
-			# Inner tech core rings
-			world_node.draw_arc(t_pos, 28.0, 0.0, TAU, 24, t_color * Color(1, 1, 1, 0.35), 1.5)
-			
-			# Rotating core shield rings
-			world_node.draw_arc(t_pos, 35.0, shield_angle, shield_angle + PI * 0.5, 16, t_color, 2.5)
-			world_node.draw_arc(t_pos, 35.0, shield_angle + PI, shield_angle + PI * 1.5, 16, t_color, 2.5)
-			
-			# Core glowing orb
-			world_node.draw_circle(t_pos, 18.0 * pulse_scale, t_color)
-			world_node.draw_circle(t_pos, 8.0 * pulse_scale, Color.WHITE)
 
-	# 8. Draw Minions (Cybernetic march drones)
-	var minions_list = _get_safe_array(game_state, "minions")
-	for m in minions_list:
-		if not (m is Dictionary): continue
-		var m_id = _get_safe_string(m, "id", "")
-		var m_pos = smooth_positions.get(m_id)
-		if m_pos == null:
-			m_pos = _get_safe_vector2(m, "pos")
-			
-		if m_pos.distance_to(cam_pos) > 800.0:
-			continue
-			
-		var phase = float(m_id.hash() % 100) * 0.1
-		var minion_scale = 1.0 + 0.08 * sin(time_ms * 0.008 + phase)
-		var rad = 18.0 * minion_scale
-		
-		# Mini shadow
-		world_node.draw_circle(m_pos + Vector2(0, 4), rad * 0.9, Color(0, 0, 0, 0.22))
-		
-		# Body styling with pulsing tech core
-		var m_team = _get_safe_string(m, "team", "blue")
-		var m_color = Color(0.4, 0.6, 1.0) if m_team == "blue" else Color(1.0, 0.5, 0.5)
-		
-		# Draw minion as a triangular cyber fighter drone pointing in its target direction
-		var target_vel = Vector2(_get_safe_float(m, "target_x", 0.0) - m_pos.x, _get_safe_float(m, "target_y", 0.0) - m_pos.y).normalized()
-		if target_vel == Vector2.ZERO:
-			target_vel = Vector2.RIGHT
-			
-		var m_angle = target_vel.angle()
-		var m_pts = PackedVector2Array([
-			m_pos + target_vel * (rad + 3.0),
-			m_pos + target_vel.rotated(2.3) * rad,
-			m_pos + target_vel.rotated(-2.3) * rad
-		])
-		world_node.draw_circle(m_pos, rad + 4.0, m_color * Color(1, 1, 1, 0.15))
-		world_node.draw_colored_polygon(m_pts, Color(0.06, 0.08, 0.12, 0.95))
-		world_node.draw_polyline(m_pts, m_color, 2.5)
-		
-		# Inner core
-		world_node.draw_circle(m_pos - target_vel * 3.0, 3.5 * minion_scale, m_color * Color(1, 1, 1, 0.4))
-		world_node.draw_circle(m_pos - target_vel * 3.0, 1.5 * minion_scale, Color.WHITE)
-		
-		# HP bar
-		_draw_entity_health_bar(world_node, m_pos + Vector2(0, -25), _get_safe_float(m, "hp", 0.0), _get_safe_float(m, "max_hp", 1.0), 30, 4)
 
 	# 9. Draw Players (Futuristic heroes with outline glows & active elemental statuses)
 	var players_list = _get_safe_array(game_state, "players")
@@ -1278,8 +1177,7 @@ func _on_world_draw():
 				world_node.draw_string(system_font, p_pos, "☠️ RESPAWNING...", HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color.RED)
 			continue
 			
-		var p_team = _get_safe_string(p, "team", "blue")
-		var p_color = Color(0.3, 0.5, 1.0) if p_team == "blue" else Color(1.0, 0.3, 0.3)
+		var p_color = Color(0.3, 0.5, 1.0) if p_id == client_id else Color(1.0, 0.3, 0.3)
 		var accent_color = Color.WHITE
 		if p_id == client_id:
 			accent_color = Color(1.0, 0.9, 0.3)
@@ -1293,7 +1191,7 @@ func _on_world_draw():
 				
 		var p_alpha = 1.0
 		if is_stealthy:
-			if p_team != my_team:
+			if p_id != client_id:
 				var am_i_near_bush = false
 				if my_player_data is Dictionary:
 					var my_curr_pos = _get_safe_vector2(my_player_data, "pos")

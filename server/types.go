@@ -61,36 +61,10 @@ type Player struct {
 	room *Room
 }
 
-type Minion struct {
-	ID       string  `json:"id"`
-	Team     string  `json:"team"` // "blue" or "red"
-	Position Vector2 `json:"pos"`
-	HP       float64 `json:"hp"`
-	MaxHP    float64 `json:"max_hp"`
-	Speed    float64 `json:"speed"`
-	TargetX  float64 `json:"target_x"`
-	TargetY  float64 `json:"target_y"`
-	State    string  `json:"state"` // "march", "attack"
-	Cooldown float64 `json:"-"`
-	FireTimer     float64 `json:"fire_timer"`
-	IceTimer      float64 `json:"ice_timer"`
-	PoisonTimer   float64 `json:"poison_timer"`
-}
-
-type Tower struct {
-	ID       string  `json:"id"`
-	Team     string  `json:"team"` // "blue" or "red"
-	Position Vector2 `json:"pos"`
-	HP       float64 `json:"hp"`
-	MaxHP    float64 `json:"max_hp"`
-	IsBase   bool    `json:"is_base"`
-	Cooldown float64 `json:"-"`
-}
-
 type Projectile struct {
 	ID        string   `json:"id"`
 	OwnerID   string   `json:"owner_id"`
-	OwnerType string   `json:"owner_type"` // "player", "minion", "tower"
+	OwnerType string   `json:"owner_type"` // "player"
 	Team      string   `json:"team"`
 	Position  Vector2  `json:"pos"`
 	Velocity  Vector2  `json:"vel"`
@@ -135,8 +109,6 @@ type ClientMessage struct {
 
 type GameStateMessage struct {
 	Players     []*Player     `json:"players"`
-	Minions     []*Minion     `json:"minions"`
-	Towers      []*Tower      `json:"towers"`
 	Projectiles []*Projectile `json:"projectiles"`
 	Gems        []*Gem        `json:"gems"`
 }
