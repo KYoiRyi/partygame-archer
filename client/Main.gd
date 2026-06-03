@@ -69,6 +69,7 @@ var system_font: Font = null
 
 # --- Interpolation / Smooth Positions ---
 var smooth_positions: Dictionary = {}
+var proj_trails: Dictionary = {}
 var status_label: Label = null
 var client_dash_cooldown: float = 0.0
 
@@ -1023,7 +1024,8 @@ func _on_world_draw():
 		var gem_type = _get_safe_string(g, "type", "xp")
 		if gem_type == "hp":
 			# Glowing red base shadow
-			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(1.0, 0.2, 0.2, 0.18))
+			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(1.0, 0.2, 0.2, 0.2))
+			world_node.draw_circle(final_pos, 14.0, Color(1.0, 0.2, 0.2, 0.15)) # Neon Aura
 			# HP: spinning cross
 			var raw_pts = [
 				Vector2(-7, -2.5), Vector2(-2.5, -2.5), Vector2(-2.5, -7), Vector2(2.5, -7),
@@ -1037,14 +1039,17 @@ func _on_world_draw():
 			world_node.draw_polyline(rotated_pts, Color(1.0, 0.85, 0.85), 1.5)
 		elif gem_type == "bomb":
 			world_node.draw_circle(g_pos + Vector2(0, 8), 10.0, Color(0.2, 0.2, 0.2, 0.3))
+			world_node.draw_circle(final_pos, 14.0, Color(1.0, 0.4, 0.1, 0.15)) # Neon Aura
 			world_node.draw_circle(final_pos, 9.0, Color(0.15, 0.15, 0.15))
 			world_node.draw_circle(final_pos - Vector2(3, 4), 3.0, Color(1.0, 0.4, 0.1)) # bomb spark
 		elif gem_type == "mushroom":
 			world_node.draw_circle(g_pos + Vector2(0, 8), 10.0, Color(0.8, 0.3, 0.8, 0.3))
+			world_node.draw_circle(final_pos, 14.0, Color(0.8, 0.3, 0.8, 0.15)) # Neon Aura
 			world_node.draw_circle(final_pos + Vector2(0, 3), 5.0, Color(0.9, 0.9, 0.9)) # stem
 			world_node.draw_arc(final_pos, 8.0, PI, TAU, 16, Color(0.8, 0.2, 0.3), 8.0) # cap
 		elif gem_type == "star":
 			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(1.0, 0.9, 0.2, 0.3))
+			world_node.draw_circle(final_pos, 14.0, Color(1.0, 0.9, 0.2, 0.15)) # Neon Aura
 			var raw_pts = [
 				Vector2(0, -10), Vector2(3, -3), Vector2(10, -3), Vector2(4, 2),
 				Vector2(6, 10), Vector2(0, 5), Vector2(-6, 10), Vector2(-4, 2),
@@ -1057,6 +1062,7 @@ func _on_world_draw():
 			world_node.draw_polyline(rotated_pts, Color(1.0, 1.0, 0.8), 1.5)
 		elif gem_type == "haste":
 			world_node.draw_circle(g_pos + Vector2(0, 8), 8.0, Color(0.3, 0.8, 1.0, 0.3))
+			world_node.draw_circle(final_pos, 14.0, Color(0.3, 0.8, 1.0, 0.15)) # Neon Aura
 			var raw_pts = [
 				Vector2(2, -10), Vector2(-4, 0), Vector2(2, 0), Vector2(-2, 10),
 				Vector2(6, -2), Vector2(0, -2)
@@ -1067,19 +1073,20 @@ func _on_world_draw():
 			world_node.draw_colored_polygon(rotated_pts, Color(0.2, 0.7, 1.0))
 		else:
 			# Glowing green base shadow
-			world_node.draw_circle(g_pos + Vector2(0, 8), 7.0, Color(0.2, 0.9, 0.4, 0.18))
+			world_node.draw_circle(g_pos + Vector2(0, 8), 7.0, Color(0.2, 0.9, 0.4, 0.2))
+			world_node.draw_circle(final_pos, 15.0, Color(0.2, 0.9, 0.4, 0.15)) # Neon Aura
 			# XP: spinning diamond
 			var raw_pts = [
-				Vector2(0, -9),
-				Vector2(6.5, 0),
-				Vector2(0, 9),
-				Vector2(-6.5, 0)
+				Vector2(0, -10),
+				Vector2(7, 0),
+				Vector2(0, 10),
+				Vector2(-7, 0)
 			]
 			var rotated_pts = PackedVector2Array()
 			for pt in raw_pts:
 				rotated_pts.append(final_pos + pt.rotated(angle_rot))
-			world_node.draw_colored_polygon(rotated_pts, Color(0.25, 0.95, 0.55))
-			world_node.draw_polyline(rotated_pts, Color(0.7, 1.0, 0.8), 1.5)
+			world_node.draw_colored_polygon(rotated_pts, Color(0.2, 0.85, 0.4))
+			world_node.draw_polyline(rotated_pts, Color(0.6, 1.0, 0.7), 1.5)
 
 	# 6. Draw Projectiles/Arrows (Plasma projectiles with trails & intensity cores)
 	var projectiles_list = _get_safe_array(game_state, "projectiles")
@@ -1114,53 +1121,62 @@ func _on_world_draw():
 		elif is_poison:
 			arrow_color = Color(0.75, 0.15, 0.9) # Acid purple
 		
-		# Draw trailing plasma beam glow (Enhanced Ion Trails)
-		var trail_length = 35.0
-		var back_p = p_pos - vel * trail_length
-		
-		# Multiple glowing ion layers for rich plasma effect
-		world_node.draw_line(back_p - vel * 10.0, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.15), 12.0)
-		world_node.draw_line(back_p, p_pos, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.4), 6.0)
-		world_node.draw_line(back_p + vel * 10.0, p_pos, arrow_color, 2.5)
-		
+		# --- ANIMATED ION TRAIL ---
+		var trail_pts = proj_trails.get(proj_id, [p_pos])
+		if trail_pts.size() > 1:
+			var pts_array = PackedVector2Array(trail_pts)
+			
+			# Glow layers for plasma trail
+			world_node.draw_polyline(pts_array, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.1), 16.0)
+			world_node.draw_polyline(pts_array, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.35), 8.0)
+			world_node.draw_polyline(pts_array, Color(1.0, 1.0, 1.0, 0.8), 2.5)
+			
+		# --- PROJECTILE HEAD ANIMATION ---
 		var head_angle = vel.angle()
+		var phase = time_ms * 0.015
+		
 		if is_ice:
-			# Shard shape for ice
-			var ice_pts = PackedVector2Array([
-				p_pos,
-				p_pos - vel.rotated(0.35) * 12.0,
-				p_pos - vel * 18.0,
-				p_pos - vel.rotated(-0.35) * 12.0
-			])
-			world_node.draw_colored_polygon(ice_pts, Color(0.4, 0.9, 1.0, 0.95))
+			# Shard shape for ice (Spinning diamond)
+			var ice_pts = PackedVector2Array()
+			for i in range(4):
+				var a = head_angle + i * PI / 2.0 + phase * 0.5
+				var r = 16.0 if i % 2 == 0 else 6.0
+				ice_pts.append(p_pos + Vector2(cos(a), sin(a)) * r)
+			world_node.draw_colored_polygon(ice_pts, Color(0.2, 0.9, 1.0, 0.9))
 			world_node.draw_polyline(ice_pts, Color.WHITE, 1.5)
 		elif is_fire:
-			# Fireball flame polygon (wiggles slightly)
-			var fire_pts = PackedVector2Array([
-				p_pos + vel * 3.0,
-				p_pos - vel.rotated(0.6) * 10.0 + vel.orthogonal() * 2.0 * sin(time_ms * 0.05),
-				p_pos - vel * 15.0,
-				p_pos - vel.rotated(-0.6) * 10.0 - vel.orthogonal() * 2.0 * sin(time_ms * 0.05)
-			])
-			world_node.draw_colored_polygon(fire_pts, Color(1.0, 0.35, 0.0))
-			world_node.draw_polyline(fire_pts, Color(1.0, 0.9, 0.3), 1.0)
-			world_node.draw_circle(p_pos - vel * 2.0, 3.5, Color.WHITE)
+			# Fireball (Pulsating fiery star)
+			var fire_pts = PackedVector2Array()
+			for i in range(5):
+				var a1 = head_angle + i * TAU / 5.0 - phase
+				var a2 = head_angle + (i + 0.5) * TAU / 5.0 - phase
+				var pulse = 2.0 * sin(time_ms * 0.04)
+				fire_pts.append(p_pos + Vector2(cos(a1), sin(a1)) * (14.0 + pulse))
+				fire_pts.append(p_pos + Vector2(cos(a2), sin(a2)) * 6.0)
+			world_node.draw_colored_polygon(fire_pts, Color(1.0, 0.35, 0.0, 0.95))
+			world_node.draw_polyline(fire_pts, Color(1.0, 0.9, 0.3), 1.5)
+			world_node.draw_circle(p_pos, 4.0, Color.WHITE)
 		elif is_poison:
-			# Bubble blob for poison
-			world_node.draw_circle(p_pos, 5.0, Color(0.8, 0.1, 1.0))
-			world_node.draw_circle(p_pos - vel * 6.0, 3.5, Color(0.6, 0.05, 0.9))
-			world_node.draw_circle(p_pos - vel * 12.0, 2.5, Color(0.5, 0.0, 0.8))
-			world_node.draw_circle(p_pos, 2.0, Color.WHITE)
+			# Acid bubble (Wobbly toxic blob)
+			var blob_r = 10.0 + 2.0 * sin(phase * 1.5)
+			world_node.draw_circle(p_pos, blob_r, Color(0.7, 0.1, 0.9, 0.8))
+			world_node.draw_circle(p_pos + Vector2(-3, -3).rotated(phase), blob_r * 0.4, Color(0.9, 0.5, 1.0, 0.9))
+			world_node.draw_circle(p_pos, 3.0, Color.WHITE)
 		else:
-			# Energetic Ion Core Head
-			world_node.draw_circle(p_pos, 7.0, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.4))
-			world_node.draw_circle(p_pos, 4.0, arrow_color)
-			world_node.draw_circle(p_pos, 2.0, Color.WHITE)
+			# Standard Energetic Ion Core Head (Arrow shape with inner energy)
+			var core_pts = PackedVector2Array([
+				p_pos + vel * 12.0,
+				p_pos - vel.rotated(0.5) * 10.0,
+				p_pos - vel * 6.0,
+				p_pos - vel.rotated(-0.5) * 10.0
+			])
+			world_node.draw_colored_polygon(core_pts, arrow_color)
+			world_node.draw_polyline(core_pts, Color.WHITE, 1.5)
 			
-			# Little ion sparks trailing
-			var spark_offset = vel.orthogonal() * 6.0 * sin(time_ms * 0.05 + float(proj_id.hash() % 100))
-			world_node.draw_circle(p_pos - vel * 10.0 + spark_offset, 2.0, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.8))
-			world_node.draw_circle(p_pos - vel * 18.0 - spark_offset, 1.5, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.5))
+			# Rotating outer halo for high-tech look
+			world_node.draw_arc(p_pos, 14.0, phase, phase + PI * 0.6, 12, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.6), 2.0)
+			world_node.draw_arc(p_pos, 14.0, phase + PI, phase + PI * 1.6, 12, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.6), 2.0)
+			world_node.draw_circle(p_pos, 3.0, Color.WHITE)
 
 
 
@@ -1233,42 +1249,61 @@ func _on_world_draw():
 			acc = inv_col
 		
 		# Soft drop shadow
-		world_node.draw_circle(p_pos + Vector2(0, 6), base_r * 0.9, Color(0, 0, 0, p_alpha * 0.28))
+		world_node.draw_circle(p_pos + Vector2(0, 8), base_r * 0.8, Color(0, 0, 0, p_alpha * 0.3))
 		
-		# Team glowing aura ring
-		world_node.draw_circle(p_pos, base_r + 5.0, col * Color(1, 1, 1, 0.15))
-		
-		# Outer chrome perimeter ring
-		world_node.draw_circle(p_pos, base_r + 3.0, acc)
-		
-		# Cybernetic armor core
-		world_node.draw_circle(p_pos, base_r, Color(0.08, 0.1, 0.13, p_alpha))
+		# --- GEOMETRIC AVATAR RENDERING ---
+		var hero_class_str = _get_safe_string(p, "hero", "ranger")
+		var aim_angle = _get_safe_float(p, "angle", 0.0)
+		var f_dir = Vector2(cos(aim_angle), sin(aim_angle))
 		
 		# Draw styling according to Hero class
-		var hero_class_str = _get_safe_string(p, "hero", "ranger")
 		if hero_class_str == "knight":
-			# Knight: heavy gold trim
-			world_node.draw_circle(p_pos, base_r - 2.0, Color(0.8, 0.6, 0.1, p_alpha))
-			world_node.draw_circle(p_pos, base_r - 5.0, col)
+			# Knight: Heavy shielded hexagon
+			var kn_pts = PackedVector2Array()
+			for i in range(6):
+				var a = aim_angle + i * TAU / 6.0
+				kn_pts.append(p_pos + Vector2(cos(a), sin(a)) * base_r)
+			world_node.draw_colored_polygon(kn_pts, Color(0.1, 0.15, 0.2, p_alpha))
+			world_node.draw_polyline(kn_pts, col, 3.5)
+			# Front shield plate
+			world_node.draw_line(p_pos + f_dir * base_r, p_pos + f_dir.rotated(PI/3) * base_r, acc, 4.0)
+			world_node.draw_line(p_pos + f_dir * base_r, p_pos + f_dir.rotated(-PI/3) * base_r, acc, 4.0)
+			
 		elif hero_class_str == "mage":
-			# Mage: glowing energy core with violet orbit
-			world_node.draw_circle(p_pos, base_r - 4.0, col)
-			var magic_a = time_ms * 0.004
-			var glyph_pos = p_pos + Vector2(cos(magic_a), sin(magic_a)) * (base_r - 6.0)
-			world_node.draw_circle(glyph_pos, 3.0, Color(0.7, 0.3, 1.0, p_alpha))
+			# Mage: Floating runic circles and star
+			world_node.draw_circle(p_pos, base_r - 2.0, Color(0.1, 0.1, 0.2, p_alpha))
+			var magic_a = time_ms * 0.003
+			world_node.draw_arc(p_pos, base_r, magic_a, magic_a + TAU, 24, col, 3.0)
+			
+			# Inner Star
+			var star_pts = PackedVector2Array()
+			for i in range(3):
+				var a1 = aim_angle + magic_a + i * TAU / 3.0
+				star_pts.append(p_pos + Vector2(cos(a1), sin(a1)) * (base_r - 4.0))
+			world_node.draw_colored_polygon(star_pts, acc * Color(1, 1, 1, 0.3))
+			world_node.draw_polyline(star_pts, acc, 2.0)
+			
 		else:
-			# Ranger: standard core
-			world_node.draw_circle(p_pos, base_r - 4.0, col)
+			# Ranger/Default: Sleek aerodynamic arrow ship
+			var arr_pts = PackedVector2Array([
+				p_pos + f_dir * (base_r + 6.0),
+				p_pos + f_dir.rotated(2.4) * base_r,
+				p_pos - f_dir * (base_r * 0.3), # indentation at back
+				p_pos + f_dir.rotated(-2.4) * base_r
+			])
+			world_node.draw_colored_polygon(arr_pts, Color(0.08, 0.1, 0.13, p_alpha))
+			world_node.draw_polyline(arr_pts, col, 3.0)
+			# Thruster
+			world_node.draw_circle(p_pos - f_dir * (base_r * 0.3), 5.0, Color(0.3, 0.8, 1.0, 0.8))
+			
+		# Energy center orb
+		world_node.draw_circle(p_pos, 5.0, col)
+		world_node.draw_circle(p_pos, 2.5, Color.WHITE)
 		
-		# Energy center
-		world_node.draw_circle(p_pos, 8.0, Color.WHITE * Color(1, 1, 1, p_alpha * 0.9))
-		
-		# Aim pointer nose (Beaming pointer direction)
-		var angle = _get_safe_float(p, "angle", 0.0)
-		var f_dir = Vector2(cos(angle), sin(angle))
-		world_node.draw_line(p_pos, p_pos + f_dir * (base_r + 11.0), acc, 4.0)
-		world_node.draw_line(p_pos, p_pos + f_dir * (base_r + 11.0), col, 2.0)
-		world_node.draw_circle(p_pos + f_dir * (base_r + 9.0), 3.5, Color.WHITE)
+		# Direction indicator (if not ranger, since ranger is already an arrow)
+		if hero_class_str != "ranger":
+			world_node.draw_line(p_pos + f_dir * (base_r * 0.5), p_pos + f_dir * (base_r + 10.0), acc, 3.0)
+			world_node.draw_circle(p_pos + f_dir * (base_r + 10.0), 3.0, acc)
 		
 		# --- ELEMENTAL TIMERS OVERLAYS ---
 		var fire_t = _get_safe_float(p, "fire_timer", 0.0)
@@ -1358,22 +1393,7 @@ func _update_smooth_positions(delta):
 			var t = clamp(18.0 * delta, 0.0, 1.0)
 			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
 			
-	# Interpolate Minion positions safely
-	var minions_list = _get_safe_array(game_state, "minions")
-	for m in minions_list:
-		if not (m is Dictionary): continue
-		var id = _get_safe_string(m, "id", "")
-		if id == "": continue
-		active_ids[id] = true
-		
-		var server_pos = _get_safe_vector2(m, "pos")
-			
-		if not smooth_positions.has(id):
-			smooth_positions[id] = server_pos
-		else:
-			var t = clamp(18.0 * delta, 0.0, 1.0)
-			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
-			
+
 	# Interpolate Projectile positions safely
 	var projectiles_list = _get_safe_array(game_state, "projectiles")
 	for proj in projectiles_list:
@@ -1386,9 +1406,15 @@ func _update_smooth_positions(delta):
 			
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
+			proj_trails[id] = [server_pos]
 		else:
 			var t = clamp(26.0 * delta, 0.0, 1.0)
 			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
+			if not proj_trails.has(id):
+				proj_trails[id] = []
+			proj_trails[id].push_front(smooth_positions[id])
+			if proj_trails[id].size() > 10:
+				proj_trails[id].pop_back()
 
 	# Interpolate Gem positions safely
 	var gems_list = _get_safe_array(game_state, "gems")
@@ -1411,6 +1437,7 @@ func _update_smooth_positions(delta):
 	for id in old_ids:
 		if not active_ids.has(id):
 			smooth_positions.erase(id)
+			proj_trails.erase(id)
 
 # --- Safe JSON Parsing Helpers ---
 
