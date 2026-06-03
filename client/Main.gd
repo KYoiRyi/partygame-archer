@@ -28,6 +28,7 @@ var grass_bushes: Array = []
 # --- Input & Movement ---
 var last_move_dir: Vector2 = Vector2.ZERO
 var last_angle: float = 0.0
+var last_move_send_time: int = 0
 var current_input_dir: Vector2 = Vector2.ZERO
 var current_input_angle: float = 0.0
 var is_chatting: bool = false
@@ -510,19 +511,25 @@ func _process_movement_input(delta):
 		current_input_angle = move_dir.angle()
 
 func _send_movement_if_changed():
-	# Only send network updates if movement vector or direction angle changes
-	if current_input_dir != last_move_dir or (current_input_dir != Vector2.ZERO and current_input_angle != last_angle):
-		last_move_dir = current_input_dir
-		last_angle = current_input_angle
-		
-		var msg = {
-			"type": "move",
-			"is_moving": current_input_dir != Vector2.ZERO,
-			"x": current_input_dir.x,
-			"y": current_input_dir.y,
-			"angle": current_input_angle
-		}
-		socket.send_text(JSON.stringify(msg))
+	# Only send network updates if movement vector or direction angle changes significantly or if time passed
+	var dir_changed_significantly = last_move_dir.distance_squared_to(current_input_dir) > 0.01
+	var angle_changed_significantly = current_input_dir != Vector2.ZERO and abs(current_input_angle - last_angle) > 0.05
+	
+	if dir_changed_significantly or angle_changed_significantly or (current_input_dir == Vector2.ZERO and last_move_dir != Vector2.ZERO):
+		var now = Time.get_ticks_msec()
+		if now - last_move_send_time > 50 or current_input_dir == Vector2.ZERO: # 20hz limit, except when stopping
+			last_move_send_time = now
+			last_move_dir = current_input_dir
+			last_angle = current_input_angle
+			
+			var msg = {
+				"type": "move",
+				"is_moving": current_input_dir != Vector2.ZERO,
+				"x": current_input_dir.x,
+				"y": current_input_dir.y,
+				"angle": current_input_angle
+			}
+			socket.send_text(JSON.stringify(msg))
 
 func _process_aiming_input(delta):
 	if client_shoot_cooldown > 0:
