@@ -1,0 +1,269 @@
+[gd_scene load_steps=2 format=3 uid="uid://c6s7f8m4s8h4v"]
+
+[ext_resource type="Script" path="res://Main.gd" id="1_4m5nb"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_4m5nb")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Lobby" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="Panel" parent="UI/Lobby"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -170.0
+offset_right = 200.0
+offset_bottom = 170.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/Lobby/Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="Title" type="Label" parent="UI/Lobby/Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "ARCHER MOBA"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="UI/Lobby/Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "Roguelike + Push Towers + Online"
+horizontal_alignment = 1
+
+[node name="NameInput" type="LineEdit" parent="UI/Lobby/Panel/VBox"]
+layout_mode = 2
+placeholder_text = "Enter Nickname..."
+
+[node name="ServerInput" type="LineEdit" parent="UI/Lobby/Panel/VBox"]
+layout_mode = 2
+text = "ws://localhost:8080/ws"
+placeholder_text = "Server WebSocket URL..."
+
+[node name="JoinButton" type="Button" parent="UI/Lobby/Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "CONNECT & PLAY"
+
+[node name="HUD" type="Control" parent="UI"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="XPBar" type="ProgressBar" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 15.0
+grow_horizontal = 2
+show_percentage = false
+
+[node name="HPBar" type="ProgressBar" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -25.0
+grow_horizontal = 2
+grow_vertical = 0
+show_percentage = true
+
+[node name="TopPanel" type="HBoxContainer" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 20.0
+offset_top = 25.0
+offset_right = -20.0
+offset_bottom = 60.0
+grow_horizontal = 2
+theme_override_constants/separation = 20
+
+[node name="BaseHPs" type="Label" parent="UI/HUD/TopPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Blue Core: 5000 | Red Core: 5000"
+
+[node name="Stats" type="Label" parent="UI/HUD/TopPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "Lvl: 1 | Score: 0"
+horizontal_alignment = 2
+
+[node name="ChatBox" type="VBoxContainer" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -250.0
+offset_right = 350.0
+offset_bottom = -45.0
+grow_vertical = 0
+mouse_filter = 2
+
+[node name="Scroll" type="ScrollContainer" parent="UI/HUD/ChatBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="ChatLog" type="VBoxContainer" parent="UI/HUD/ChatBox/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="ChatInput" type="LineEdit" parent="UI/HUD/ChatBox"]
+layout_mode = 2
+placeholder_text = "Press Enter to Chat..."
+
+[node name="Scoreboard" type="VBoxContainer" parent="UI/HUD"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -220.0
+offset_top = 80.0
+offset_right = -20.0
+offset_bottom = 300.0
+grow_horizontal = 0
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="UI/HUD/Scoreboard"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "SCOREBOARD:"
+
+[node name="List" type="VBoxContainer" parent="UI/HUD/Scoreboard"]
+layout_mode = 2
+
+[node name="SkillPanel" type="PanelContainer" parent="UI"]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -250.0
+offset_top = -120.0
+offset_right = 250.0
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/SkillPanel"]
+layout_mode = 2
+theme_override_constants/separation = 15
+alignment = 1
+
+[node name="Title" type="Label" parent="UI/SkillPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "LEVEL UP! CHOOSE A SKILL"
+horizontal_alignment = 1
+
+[node name="Choices" type="HBoxContainer" parent="UI/SkillPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="Choice1" type="Button" parent="UI/SkillPanel/VBox/Choices"]
+custom_minimum_size = Vector2(130, 100)
+layout_mode = 2
+text = "Multi Shot"
+
+[node name="Choice2" type="Button" parent="UI/SkillPanel/VBox/Choices"]
+custom_minimum_size = Vector2(130, 100)
+layout_mode = 2
+text = "Bouncing"
+
+[node name="Choice3" type="Button" parent="UI/SkillPanel/VBox/Choices"]
+custom_minimum_size = Vector2(130, 100)
+layout_mode = 2
+text = "Fire Arrow"
+
+[node name="GameOver" type="Control" parent="UI"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="Panel" parent="UI/GameOver"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/GameOver/Panel"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -100.0
+offset_right = 200.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="Title" type="Label" parent="UI/GameOver/Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 36
+text = "VICTORY!"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="UI/GameOver/Panel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Blue Team wins the match!"
+horizontal_alignment = 1
+
+[node name="Message" type="Label" parent="UI/GameOver/Panel/VBox"]
+layout_mode = 2
+text = "Next match starting in 10 seconds..."
+horizontal_alignment = 1

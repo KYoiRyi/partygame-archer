@@ -1,0 +1,10 @@
+# Ignore executables and zip downloads
+godot
+game_server
+*.zip
+*.tpz
+*.log
+
+# Ignore Godot import cache
+client/.godot/
+client/export_presets.cfg
