@@ -47,10 +47,34 @@ jobs:
           unzip -j templates.tpz "templates/android_debug.apk" "templates/android_release.apk" -d ~/.local/share/godot/export_templates/4.3.stable/
           rm templates.tpz
 
+      - name: Install Android Build Template
+        run: |
+          ./godot --headless --path client --install-android-build-template
+
+      - name: Enable Cleartext Traffic in AndroidManifest.xml
+        run: |
+          python3 -c '
+          import os
+          path = "client/android/build/AndroidManifest.xml"
+          if os.path.exists(path):
+              with open(path, "r", encoding="utf-8") as f:
+                  content = f.read()
+              if "android:usesCleartextTraffic" not in content:
+                  content = content.replace("<application", "<application android:usesCleartextTraffic=\"true\"")
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(content)
+                  print("usesCleartextTraffic added successfully to AndroidManifest.xml")
+              else:
+                  print("usesCleartextTraffic already present")
+          else:
+              print("AndroidManifest.xml not found")
+          '
+
       - name: Export APK
         run: |
           mkdir -p dist
           ./godot --headless --path client --export-debug "Android" ../dist/archer.apk
+
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
