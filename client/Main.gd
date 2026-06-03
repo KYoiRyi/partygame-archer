@@ -175,7 +175,9 @@ func _process(delta):
 				
 				var json = JSON.new()
 				if json.parse(p_str) == OK:
-					_handle_server_message(json.get_data())
+					var parsed_data = json.get_data()
+					if parsed_data is Dictionary:
+						_handle_server_message(parsed_data)
 					
 	elif state == WebSocketPeer.STATE_CLOSED:
 		if is_connected:
@@ -208,9 +210,9 @@ func _process(delta):
 	_update_smooth_positions(delta)
 	
 	# 2. Smooth Camera Follow
-	if my_player_data:
-		var pos_dict = my_player_data.get("pos", {"x": 0.0, "y": 0.0})
-		var my_smooth_pos = smooth_positions.get(client_id, Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0)))
+	if my_player_data is Dictionary:
+		var my_pos = _get_safe_vector2(my_player_data, "pos")
+		var my_smooth_pos = smooth_positions.get(client_id, my_pos)
 		var target_cam_pos = my_smooth_pos
 		# Clamp camera inside map bounds with some margin
 		target_cam_pos.x = clamp(target_cam_pos.x, 640, 3000 - 640)
@@ -224,7 +226,7 @@ func _process(delta):
 		$Camera2D.position = $Camera2D.position.lerp(target_cam_pos, 8.0 * delta) + shake_offset
 	
 	# 3. Process Input (If connected and not chatting)
-	if is_connected and not is_chatting and my_player_data and not my_player_data.get("dead", false):
+	if is_connected and not is_chatting and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
 		_process_movement_input(delta)
 		_process_aiming_input(delta)
 		
@@ -272,9 +274,8 @@ func _process_aiming_input(delta):
 	# Manual Shoot: hold left mouse click to aim and shoot
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		var mouse_pos = get_global_mouse_position()
-		if my_player_data:
-			var pos_dict = my_player_data.get("pos", {"x": 0.0, "y": 0.0})
-			var p_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+		if my_player_data is Dictionary:
+			var p_pos = _get_safe_vector2(my_player_data, "pos")
 			var angle = (mouse_pos - p_pos).angle()
 			
 			var msg = {
@@ -304,59 +305,72 @@ func _update_visual_effects(delta):
 	hit_sparks = active_sparks
 
 func _handle_server_message(data: Dictionary):
-	var type = data.get("type", "")
+	var type = _get_safe_string(data, "type", "")
 	
 	match type:
 		"init":
-			client_id = data.get("client_id", "")
-			my_team = data.get("team", "")
-			walls = data.get("walls", [])
+			client_id = _get_safe_string(data, "client_id", "")
+			my_team = _get_safe_string(data, "team", "")
+			walls = _get_safe_array(data, "walls")
 			add_chat_message("System", "Joined match! You are Team: " + my_team.to_upper())
 			
 		"state":
-			var old_minion_hps = _get_entities_hps(game_state.get("minions", []))
-			var old_player_hps = _get_entities_hps(game_state.get("players", []))
-			var old_tower_hps = _get_entities_hps(game_state.get("towers", []))
+			var old_minion_hps = _get_entities_hps(_get_safe_array(game_state, "minions"))
+			var old_player_hps = _get_entities_hps(_get_safe_array(game_state, "players"))
+			var old_tower_hps = _get_entities_hps(_get_safe_array(game_state, "towers"))
 			
-			game_state = data.get("state", {})
+			var raw_state = data.get("state")
+			if raw_state is Dictionary:
+				game_state = raw_state
+			else:
+				game_state = {
+					"players": [],
+					"minions": [],
+					"towers": [],
+					"projectiles": [],
+					"gems": []
+				}
 			
 			# Find my player data
 			my_player_data = null
-			for p in game_state.get("players", []):
-				if p.get("id", "") == client_id:
+			var players_list = _get_safe_array(game_state, "players")
+			for p in players_list:
+				if p is Dictionary and _get_safe_string(p, "id", "") == client_id:
 					my_player_data = p
 					break
 			
 			# Update HUD
-			if my_player_data:
-				$UI/HUD/XPBar.max_value = my_player_data.get("xp_to_next", 100)
-				$UI/HUD/XPBar.value = my_player_data.get("xp", 0)
-				$UI/HUD/HPBar.max_value = my_player_data.get("max_hp", 100)
-				$UI/HUD/HPBar.value = my_player_data.get("hp", 0)
-				$UI/HUD/TopPanel/Stats.text = "Lvl: " + str(my_player_data.get("level", 1)) + " | Score: " + str(my_player_data.get("score", 0))
+			if my_player_data is Dictionary:
+				$UI/HUD/XPBar.max_value = _get_safe_int(my_player_data, "xp_to_next", 100)
+				$UI/HUD/XPBar.value = _get_safe_int(my_player_data, "xp", 0)
+				$UI/HUD/HPBar.max_value = _get_safe_int(my_player_data, "max_hp", 100)
+				$UI/HUD/HPBar.value = _get_safe_int(my_player_data, "hp", 0)
+				$UI/HUD/TopPanel/Stats.text = "Lvl: " + str(_get_safe_int(my_player_data, "level", 1)) + " | Score: " + str(_get_safe_int(my_player_data, "score", 0))
 				
-				if my_player_data.get("dead", false):
-					$UI/HUD/TopPanel/Stats.text = "☠️ DEAD (Respawning...) | Lvl: " + str(my_player_data.get("level", 1)) + " | Score: " + str(my_player_data.get("score", 0))
+				if _get_safe_bool(my_player_data, "dead", false):
+					$UI/HUD/TopPanel/Stats.text = "☠️ DEAD (Respawning...) | Lvl: " + str(_get_safe_int(my_player_data, "level", 1)) + " | Score: " + str(_get_safe_int(my_player_data, "score", 0))
 			
 			# Core base health updates
 			var blue_core_hp = "0"
 			var red_core_hp = "0"
-			for t in game_state.get("towers", []):
-				var t_id = t.get("id", "")
-				if t_id == "blue_base": blue_core_hp = str(int(t.get("hp", 0.0)))
-				if t_id == "red_base": red_core_hp = str(int(t.get("hp", 0.0)))
+			var towers_list = _get_safe_array(game_state, "towers")
+			for t in towers_list:
+				if t is Dictionary:
+					var t_id = _get_safe_string(t, "id", "")
+					if t_id == "blue_base": blue_core_hp = str(int(_get_safe_float(t, "hp", 0.0)))
+					if t_id == "red_base": red_core_hp = str(int(_get_safe_float(t, "hp", 0.0)))
 			$UI/HUD/TopPanel/BaseHPs.text = "Blue Core: " + blue_core_hp + " | Red Core: " + red_core_hp
 			
 			# Check damage events for Juice (Screen shakes & Damage Texts)
-			_spawn_damage_juices(game_state.get("minions", []), old_minion_hps)
-			_spawn_damage_juices(game_state.get("players", []), old_player_hps)
-			_spawn_damage_juices(game_state.get("towers", []), old_tower_hps)
+			_spawn_damage_juices(_get_safe_array(game_state, "minions"), old_minion_hps)
+			_spawn_damage_juices(_get_safe_array(game_state, "players"), old_player_hps)
+			_spawn_damage_juices(_get_safe_array(game_state, "towers"), old_tower_hps)
 			
 			_update_scoreboard()
 			
 		"levelup":
 			# Show skill choice menu
-			var choices = data.get("skill_choices", [])
+			var choices = _get_safe_array(data, "skill_choices")
 			if choices.size() >= 3:
 				$UI/SkillPanel/VBox/Choices/Choice1.text = SKILL_NAMES.get(choices[0], choices[0])
 				$UI/SkillPanel/VBox/Choices/Choice1.set_meta("skill", choices[0])
@@ -370,17 +384,17 @@ func _handle_server_message(data: Dictionary):
 				$UI/SkillPanel.visible = true
 				
 		"chat":
-			var sender = data.get("sender_name", "")
-			var msg = data.get("chat_msg", "")
+			var sender = _get_safe_string(data, "sender_name", "")
+			var msg = _get_safe_string(data, "chat_msg", "")
 			add_chat_message(sender, msg)
 			
 		"kill_feed":
-			var killer = data.get("killer_name", "")
-			var victim = data.get("victim_name", "")
+			var killer = _get_safe_string(data, "killer_name", "")
+			var victim = _get_safe_string(data, "victim_name", "")
 			add_chat_message("KILL", killer + " 🏹 killed 💀 " + victim)
 			
 		"game_over":
-			var winner = data.get("winner_team", "")
+			var winner = _get_safe_string(data, "winner_team", "")
 			$UI/GameOver/Panel/VBox/Title.text = "VICTORY!" if winner == my_team else "DEFEAT!"
 			$UI/GameOver/Panel/VBox/Subtitle.text = winner.to_upper() + " Team destroyed the opponent's core base!"
 			$UI/GameOver.visible = true
@@ -392,23 +406,36 @@ func _handle_server_message(data: Dictionary):
 
 func _get_entities_hps(list: Array) -> Dictionary:
 	var hps = {}
+	if list == null:
+		return hps
 	for e in list:
-		hps[e.id] = e.hp
+		if e is Dictionary:
+			var e_id = _get_safe_string(e, "id", "")
+			if e_id != "":
+				hps[e_id] = _get_safe_float(e, "hp", 0.0)
 	return hps
 
 func _spawn_damage_juices(new_list: Array, old_hps: Dictionary):
+	if new_list == null:
+		return
 	for e in new_list:
-		if old_hps.has(e.id):
-			var old_hp = old_hps[e.id]
-			if e.hp < old_hp:
-				var diff = old_hp - e.hp
-				var e_pos = Vector2(e.pos.x, e.pos.y)
+		if not (e is Dictionary):
+			continue
+		var e_id = _get_safe_string(e, "id", "")
+		if e_id == "":
+			continue
+		if old_hps.has(e_id):
+			var old_hp = old_hps[e_id]
+			var current_hp = _get_safe_float(e, "hp", 0.0)
+			if current_hp < old_hp:
+				var diff = old_hp - current_hp
+				var e_pos = _get_safe_vector2(e, "pos")
 				
 				# Spawn Damage Floating Text
 				damage_texts.append({
 					"pos": e_pos + Vector2(randf_range(-15, 15), -20),
 					"text": str(int(diff)),
-					"color": Color(1.0, 0.3, 0.3) if e.team != my_team else Color(1.0, 0.9, 0.2),
+					"color": Color(1.0, 0.3, 0.3) if _get_safe_string(e, "team", "") != my_team else Color(1.0, 0.9, 0.2),
 					"life": 0.8
 				})
 				
@@ -419,13 +446,13 @@ func _spawn_damage_juices(new_list: Array, old_hps: Dictionary):
 					hit_sparks.append({
 						"pos": e_pos,
 						"vel": Vector2(cos(angle), sin(angle)) * speed,
-						"color": Color(1.0, 0.6, 0.1) if e.team != my_team else Color(0.9, 0.2, 0.2),
+						"color": Color(1.0, 0.6, 0.1) if _get_safe_string(e, "team", "") != my_team else Color(0.9, 0.2, 0.2),
 						"life": randf_range(0.2, 0.45),
 						"size": randf_range(2.0, 5.0)
 					})
 				
 				# Trigger screen shake if I took damage
-				if e.id == client_id:
+				if e_id == client_id:
 					screen_shake = 12.0
 
 func _on_skill_chosen(index: int):
@@ -483,17 +510,35 @@ func _update_scoreboard():
 	for c in $UI/HUD/Scoreboard/List.get_children():
 		c.queue_free()
 		
-	# Sort players by score
-	var list = game_state.get("players", []).duplicate()
-	list.sort_custom(func(a, b): return a.score > b.score)
+	var players_list = _get_safe_array(game_state, "players")
+	if players_list == null:
+		return
+		
+	# Sort players by score safely
+	var list = players_list.duplicate()
+	list.sort_custom(func(a, b):
+		var a_score = 0
+		var b_score = 0
+		if a is Dictionary:
+			a_score = _get_safe_int(a, "score", 0)
+		if b is Dictionary:
+			b_score = _get_safe_int(b, "score", 0)
+		return a_score > b_score
+	)
 	
 	# Draw top 6
 	var count = 0
 	for p in list:
+		if not (p is Dictionary):
+			continue
 		if count >= 6: break
 		var l = Label.new()
-		l.text = p.name + " (" + p.team.to_upper() + "): " + str(p.score) + " (Lvl " + str(p.level) + ")"
-		if p.team == "blue":
+		var p_name = _get_safe_string(p, "name", "Archer")
+		var p_team = _get_safe_string(p, "team", "blue")
+		var p_score = _get_safe_int(p, "score", 0)
+		var p_level = _get_safe_int(p, "level", 1)
+		l.text = p_name + " (" + p_team.to_upper() + "): " + str(p_score) + " (Lvl " + str(p_level) + ")"
+		if p_team == "blue":
 			l.add_theme_color_override("font_color", Color(0.4, 0.6, 1.0))
 		else:
 			l.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
@@ -535,14 +580,15 @@ func _on_world_draw():
 		world_node.draw_rect(r, Color(0.42, 0.48, 0.55), false, 3.0)
 
 	# Draw Gems
-	for g in game_state.get("gems", []):
-		var g_id = g.get("id", "")
+	var gems_list = _get_safe_array(game_state, "gems")
+	for g in gems_list:
+		if not (g is Dictionary): continue
+		var g_id = _get_safe_string(g, "id", "")
 		var g_pos = smooth_positions.get(g_id)
 		if g_pos == null:
-			var pos_dict = g.get("pos", {"x": 0.0, "y": 0.0})
-			g_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			g_pos = _get_safe_vector2(g, "pos")
 			
-		if g.get("type", "xp") == "hp":
+		if _get_safe_string(g, "type", "xp") == "hp":
 			# HP: red cross
 			world_node.draw_rect(Rect2(g_pos.x - 7, g_pos.y - 3, 14, 6), Color(1.0, 0.2, 0.2), true)
 			world_node.draw_rect(Rect2(g_pos.x - 3, g_pos.y - 7, 6, 14), Color(1.0, 0.2, 0.2), true)
@@ -558,21 +604,21 @@ func _on_world_draw():
 			world_node.draw_polyline(pts, Color(0.6, 1.0, 0.7), 1.5)
 
 	# Draw Projectiles/Arrows
-	for proj in game_state.get("projectiles", []):
-		var proj_id = proj.get("id", "")
+	var projectiles_list = _get_safe_array(game_state, "projectiles")
+	for proj in projectiles_list:
+		if not (proj is Dictionary): continue
+		var proj_id = _get_safe_string(proj, "id", "")
 		var p_pos = smooth_positions.get(proj_id)
 		if p_pos == null:
-			var pos_dict = proj.get("pos", {"x": 0.0, "y": 0.0})
-			p_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			p_pos = _get_safe_vector2(proj, "pos")
 			
-		var vel_dict = proj.get("vel", {"x": 1.0, "y": 0.0})
-		var vel = Vector2(vel_dict.get("x", 1.0), vel_dict.get("y", 0.0)).normalized()
+		var vel = _get_safe_vector2(proj, "vel", Vector2(1.0, 0.0)).normalized()
 		
 		# Draw arrow stick
 		var length = 22.0
 		var start_p = p_pos - vel * length
 		var arrow_color = Color(1.0, 0.85, 0.3)
-		var proj_team = proj.get("team", "blue")
+		var proj_team = _get_safe_string(proj, "team", "blue")
 		if proj_team == "blue":
 			arrow_color = Color(0.4, 0.7, 1.0)
 		elif proj_team == "red":
@@ -590,14 +636,15 @@ func _on_world_draw():
 		world_node.draw_colored_polygon(pts, arrow_color)
 
 	# Draw Towers & Core Bases
-	for t in game_state.get("towers", []):
-		var pos_dict = t.get("pos", {"x": 0.0, "y": 0.0})
-		var t_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
-		var t_team = t.get("team", "blue")
+	var towers_list = _get_safe_array(game_state, "towers")
+	for t in towers_list:
+		if not (t is Dictionary): continue
+		var t_pos = _get_safe_vector2(t, "pos")
+		var t_team = _get_safe_string(t, "team", "blue")
 		var t_color = Color(0.3, 0.5, 1.0) if t_team == "blue" else Color(1.0, 0.3, 0.3)
 		var range_color = Color(0.3, 0.5, 1.0, 0.08) if t_team == "blue" else Color(1.0, 0.3, 0.3, 0.08)
 		
-		if t.get("is_base", false):
+		if _get_safe_bool(t, "is_base", false):
 			# Draw Giant Base Octagon
 			var base_radius = 80.0
 			var pts = PackedVector2Array()
@@ -617,7 +664,7 @@ func _on_world_draw():
 			world_node.draw_circle(t_pos, 550.0, t_color * Color(1.0, 1.0, 1.0, 0.3), false, 2.0)
 			
 			# Base HP bar
-			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -95), t.get("hp", 0.0), t.get("max_hp", 1.0), 150, 12)
+			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -95), _get_safe_float(t, "hp", 0.0), _get_safe_float(t, "max_hp", 1.0), 150, 12)
 		else:
 			# Standard Defense Tower
 			world_node.draw_circle(t_pos, 45.0, Color(0.18, 0.22, 0.26))
@@ -629,17 +676,18 @@ func _on_world_draw():
 			world_node.draw_circle(t_pos, 400.0, t_color * Color(1.0, 1.0, 1.0, 0.3), false, 1.5)
 			
 			# HP bar
-			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -60), t.get("hp", 0.0), t.get("max_hp", 1.0), 80, 8)
+			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -60), _get_safe_float(t, "hp", 0.0), _get_safe_float(t, "max_hp", 1.0), 80, 8)
 
 	# Draw Minions
-	for m in game_state.get("minions", []):
-		var m_id = m.get("id", "")
+	var minions_list = _get_safe_array(game_state, "minions")
+	for m in minions_list:
+		if not (m is Dictionary): continue
+		var m_id = _get_safe_string(m, "id", "")
 		var m_pos = smooth_positions.get(m_id)
 		if m_pos == null:
-			var pos_dict = m.get("pos", {"x": 0.0, "y": 0.0})
-			m_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			m_pos = _get_safe_vector2(m, "pos")
 			
-		var m_team = m.get("team", "blue")
+		var m_team = _get_safe_string(m, "team", "blue")
 		var m_color = Color(0.4, 0.6, 1.0) if m_team == "blue" else Color(1.0, 0.5, 0.5)
 		
 		# Draw minion circle body
@@ -647,29 +695,30 @@ func _on_world_draw():
 		world_node.draw_circle(m_pos, 18.0, Color.BLACK, false, 1.5)
 		
 		# Eyes/indicator
-		var target_vel = Vector2(m.get("target_x", 0.0) - m_pos.x, m.get("target_y", 0.0) - m_pos.y).normalized()
+		var target_vel = Vector2(_get_safe_float(m, "target_x", 0.0) - m_pos.x, _get_safe_float(m, "target_y", 0.0) - m_pos.y).normalized()
 		world_node.draw_line(m_pos, m_pos + target_vel * 15.0, Color.BLACK, 3.0)
 		
 		# HP bar
-		_draw_entity_health_bar(world_node, m_pos + Vector2(0, -25), m.get("hp", 0.0), m.get("max_hp", 1.0), 30, 4)
+		_draw_entity_health_bar(world_node, m_pos + Vector2(0, -25), _get_safe_float(m, "hp", 0.0), _get_safe_float(m, "max_hp", 1.0), 30, 4)
 
 	# Draw Players
-	for p in game_state.get("players", []):
-		var p_id = p.get("id", "")
+	var players_list = _get_safe_array(game_state, "players")
+	for p in players_list:
+		if not (p is Dictionary): continue
+		var p_id = _get_safe_string(p, "id", "")
 		if p_id == "": continue
 		
 		var p_pos = smooth_positions.get(p_id)
 		if p_pos == null:
-			var pos_dict = p.get("pos", {"x": 0.0, "y": 0.0})
-			p_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			p_pos = _get_safe_vector2(p, "pos")
 			
-		if p.get("dead", false):
+		if _get_safe_bool(p, "dead", false):
 			# Draw small dead marker if not me, or standard if me
 			if p_id == client_id:
 				world_node.draw_string(system_font, p_pos, "☠️ RESPAWNING...", HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color.RED)
 			continue
 			
-		var p_team = p.get("team", "blue")
+		var p_team = _get_safe_string(p, "team", "blue")
 		var p_color = Color(0.3, 0.5, 1.0) if p_team == "blue" else Color(1.0, 0.3, 0.3)
 		var accent_color = Color.WHITE
 		if p_id == client_id:
@@ -688,9 +737,8 @@ func _on_world_draw():
 			if p_team != my_team:
 				# Check if my player is also in the SAME bush, otherwise he is fully hidden!
 				var am_i_near_bush = false
-				if my_player_data:
-					var my_pos_dict = my_player_data.get("pos", {"x": 0.0, "y": 0.0})
-					var my_curr_pos = Vector2(my_pos_dict.get("x", 0.0), my_pos_dict.get("y", 0.0))
+				if my_player_data is Dictionary:
+					var my_curr_pos = _get_safe_vector2(my_player_data, "pos")
 					for b in grass_bushes:
 						if my_curr_pos.distance_to(b.pos) < b.radius and p_pos.distance_to(b.pos) < b.radius:
 							am_i_near_bush = true
@@ -710,20 +758,20 @@ func _on_world_draw():
 		world_node.draw_circle(p_pos, 8.0, Color(0, 0, 0, p_alpha * 0.4))
 		
 		# Facing Nose (Gun pointer)
-		var angle = p.get("angle", 0.0)
+		var angle = _get_safe_float(p, "angle", 0.0)
 		var f_dir = Vector2(cos(angle), sin(angle))
 		world_node.draw_line(p_pos, p_pos + f_dir * 33.0, acc, 4.0)
 		world_node.draw_line(p_pos, p_pos + f_dir * 33.0, col, 2.0)
 		
 		# Name plate and Level badge
-		var p_name = p.get("name", "Archer")
-		if p.get("is_bot", false):
+		var p_name = _get_safe_string(p, "name", "Archer")
+		if _get_safe_bool(p, "is_bot", false):
 			p_name = "🤖 " + p_name
-		var badge_str = "Lvl " + str(p.get("level", 1)) + " " + p_name
+		var badge_str = "Lvl " + str(_get_safe_int(p, "level", 1)) + " " + p_name
 		world_node.draw_string(system_font, p_pos + Vector2(-60, -42), badge_str, HORIZONTAL_ALIGNMENT_CENTER, 120, 12, acc)
 		
 		# Health Bar
-		_draw_entity_health_bar(world_node, p_pos + Vector2(0, -32), p.get("hp", 0.0), p.get("max_hp", 1.0), 45, 5, p_alpha)
+		_draw_entity_health_bar(world_node, p_pos + Vector2(0, -32), _get_safe_float(p, "hp", 0.0), _get_safe_float(p, "max_hp", 1.0), 45, 5, p_alpha)
 
 	# Draw Hit Sparks particles
 	for s in hit_sparks:
@@ -754,14 +802,14 @@ func _update_smooth_positions(delta):
 	var active_ids = {}
 	
 	# Interpolate Player positions safely
-	for p in game_state.get("players", []):
-		var id = p.get("id", "")
+	var players_list = _get_safe_array(game_state, "players")
+	for p in players_list:
+		if not (p is Dictionary): continue
+		var id = _get_safe_string(p, "id", "")
 		if id == "": continue
 		active_ids[id] = true
 		
-		var server_pos = Vector2(0, 0)
-		if p.has("pos") and p.pos != null:
-			server_pos = Vector2(p.pos.get("x", 0.0), p.pos.get("y", 0.0))
+		var server_pos = _get_safe_vector2(p, "pos")
 			
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
@@ -769,14 +817,14 @@ func _update_smooth_positions(delta):
 			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 18.0 * delta)
 			
 	# Interpolate Minion positions safely
-	for m in game_state.get("minions", []):
-		var id = m.get("id", "")
+	var minions_list = _get_safe_array(game_state, "minions")
+	for m in minions_list:
+		if not (m is Dictionary): continue
+		var id = _get_safe_string(m, "id", "")
 		if id == "": continue
 		active_ids[id] = true
 		
-		var server_pos = Vector2(0, 0)
-		if m.has("pos") and m.pos != null:
-			server_pos = Vector2(m.pos.get("x", 0.0), m.pos.get("y", 0.0))
+		var server_pos = _get_safe_vector2(m, "pos")
 			
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
@@ -784,14 +832,14 @@ func _update_smooth_positions(delta):
 			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 18.0 * delta)
 			
 	# Interpolate Projectile positions safely
-	for proj in game_state.get("projectiles", []):
-		var id = proj.get("id", "")
+	var projectiles_list = _get_safe_array(game_state, "projectiles")
+	for proj in projectiles_list:
+		if not (proj is Dictionary): continue
+		var id = _get_safe_string(proj, "id", "")
 		if id == "": continue
 		active_ids[id] = true
 		
-		var server_pos = Vector2(0, 0)
-		if proj.has("pos") and proj.pos != null:
-			server_pos = Vector2(proj.pos.get("x", 0.0), proj.pos.get("y", 0.0))
+		var server_pos = _get_safe_vector2(proj, "pos")
 			
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
@@ -799,14 +847,14 @@ func _update_smooth_positions(delta):
 			smooth_positions[id] = smooth_positions[id].lerp(server_pos, 26.0 * delta)
 
 	# Interpolate Gem positions safely
-	for g in game_state.get("gems", []):
-		var id = g.get("id", "")
+	var gems_list = _get_safe_array(game_state, "gems")
+	for g in gems_list:
+		if not (g is Dictionary): continue
+		var id = _get_safe_string(g, "id", "")
 		if id == "": continue
 		active_ids[id] = true
 		
-		var server_pos = Vector2(0, 0)
-		if g.has("pos") and g.pos != null:
-			server_pos = Vector2(g.pos.get("x", 0.0), g.pos.get("y", 0.0))
+		var server_pos = _get_safe_vector2(g, "pos")
 			
 		if not smooth_positions.has(id):
 			smooth_positions[id] = server_pos
@@ -818,3 +866,62 @@ func _update_smooth_positions(delta):
 	for id in old_ids:
 		if not active_ids.has(id):
 			smooth_positions.erase(id)
+
+# --- Safe JSON Parsing Helpers ---
+
+func _get_safe_dict(dict: Variant, key: String) -> Dictionary:
+	if not (dict is Dictionary):
+		return {}
+	var val = dict.get(key)
+	if val is Dictionary:
+		return val
+	return {}
+
+func _get_safe_array(dict: Variant, key: String) -> Array:
+	if not (dict is Dictionary):
+		return []
+	var val = dict.get(key)
+	if val is Array:
+		return val
+	return []
+
+func _get_safe_string(dict: Variant, key: String, default_val: String = "") -> String:
+	if not (dict is Dictionary):
+		return default_val
+	var val = dict.get(key)
+	if val == null:
+		return default_val
+	return str(val)
+
+func _get_safe_float(dict: Variant, key: String, default_val: float = 0.0) -> float:
+	if not (dict is Dictionary):
+		return default_val
+	var val = dict.get(key)
+	if val == null:
+		return default_val
+	return float(val)
+
+func _get_safe_int(dict: Variant, key: String, default_val: int = 0) -> int:
+	if not (dict is Dictionary):
+		return default_val
+	var val = dict.get(key)
+	if val == null:
+		return default_val
+	return int(val)
+
+func _get_safe_bool(dict: Variant, key: String, default_val: bool = false) -> bool:
+	if not (dict is Dictionary):
+		return default_val
+	var val = dict.get(key)
+	if val == null:
+		return default_val
+	return bool(val)
+
+func _get_safe_vector2(dict: Variant, key: String, default_val: Vector2 = Vector2.ZERO) -> Vector2:
+	var d = _get_safe_dict(dict, key)
+	if d.is_empty():
+		return default_val
+	return Vector2(
+		_get_safe_float(d, "x", default_val.x),
+		_get_safe_float(d, "y", default_val.y)
+	)
