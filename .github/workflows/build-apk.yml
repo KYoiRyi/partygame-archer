@@ -43,9 +43,10 @@ jobs:
         run: |
           wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz -O templates.tpz
           mkdir -p ~/.local/share/godot/export_templates/4.3.stable
-          # Extract only Android templates to speed up the run
-          unzip -j templates.tpz "templates/android_debug.apk" "templates/android_release.apk" -d ~/.local/share/godot/export_templates/4.3.stable/
+          # Extract Android templates and source ZIP to speed up custom Gradle builds
+          unzip -j templates.tpz "templates/android_debug.apk" "templates/android_release.apk" "templates/android_source.zip" -d ~/.local/share/godot/export_templates/4.3.stable/
           rm templates.tpz
+
 
       - name: Install Android Build Template
         run: |
