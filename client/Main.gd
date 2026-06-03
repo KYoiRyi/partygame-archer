@@ -28,6 +28,8 @@ var grass_bushes: Array = []
 # --- Input & Movement ---
 var last_move_dir: Vector2 = Vector2.ZERO
 var last_angle: float = 0.0
+var current_input_dir: Vector2 = Vector2.ZERO
+var current_input_angle: float = 0.0
 var is_chatting: bool = false
 
 # --- Virtual Touchscreen Controls ---
@@ -169,15 +171,7 @@ func _input(event: InputEvent):
 			if event.index == joystick_touch_index:
 				joystick_active = false
 				joystick_touch_index = -1
-				last_move_dir = Vector2.ZERO
-				var msg = {
-					"type": "move",
-					"is_moving": false,
-					"x": 0.0,
-					"y": 0.0,
-					"angle": last_angle
-				}
-				socket.send_text(JSON.stringify(msg))
+				current_input_dir = Vector2.ZERO
 				if joystick_draw_node:
 					joystick_draw_node.queue_redraw()
 			elif event.index == aim_touch_index:
@@ -199,26 +193,10 @@ func _input(event: InputEvent):
 			var move_dir = offset / JOYSTICK_MAX_DRAG
 			if move_dir.length() > 0.15:
 				var angle = move_dir.angle()
-				last_angle = angle
-				last_move_dir = move_dir
-				var msg = {
-					"type": "move",
-					"is_moving": true,
-					"x": move_dir.x,
-					"y": move_dir.y,
-					"angle": angle
-				}
-				socket.send_text(JSON.stringify(msg))
+				current_input_dir = move_dir
+				current_input_angle = angle
 			else:
-				last_move_dir = Vector2.ZERO
-				var msg = {
-					"type": "move",
-					"is_moving": false,
-					"x": 0.0,
-					"y": 0.0,
-					"angle": last_angle
-				}
-				socket.send_text(JSON.stringify(msg))
+				current_input_dir = Vector2.ZERO
 				
 			if joystick_draw_node:
 				joystick_draw_node.queue_redraw()
@@ -441,6 +419,7 @@ func _process(delta):
 	if is_connected and not is_chatting and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
 		_process_movement_input(delta)
 		_process_aiming_input(delta)
+		_send_movement_if_changed()
 		
 	# 4. Handle Chat Open key (Enter)
 	if Input.is_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_ENTER):
@@ -455,6 +434,10 @@ func _process(delta):
 	$World.queue_redraw()
 
 func _process_movement_input(delta):
+	if joystick_active:
+		# Touch joystick takes absolute priority, ignore keyboard inputs
+		return
+		
 	var move_dir = Vector2.ZERO
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): move_dir.y -= 1
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): move_dir.y += 1
@@ -463,22 +446,22 @@ func _process_movement_input(delta):
 	
 	move_dir = move_dir.normalized()
 	
-	# Find facing angle
-	var angle = last_angle
+	current_input_dir = move_dir
 	if move_dir != Vector2.ZERO:
-		angle = move_dir.angle()
-		last_angle = angle
-		
-	# Send input update if changed
-	if move_dir != last_move_dir or angle != last_angle:
-		last_move_dir = move_dir
+		current_input_angle = move_dir.angle()
+
+func _send_movement_if_changed():
+	# Only send network updates if movement vector or direction angle changes
+	if current_input_dir != last_move_dir or (current_input_dir != Vector2.ZERO and current_input_angle != last_angle):
+		last_move_dir = current_input_dir
+		last_angle = current_input_angle
 		
 		var msg = {
 			"type": "move",
-			"is_moving": move_dir != Vector2.ZERO,
-			"x": move_dir.x,
-			"y": move_dir.y,
-			"angle": angle
+			"is_moving": current_input_dir != Vector2.ZERO,
+			"x": current_input_dir.x,
+			"y": current_input_dir.y,
+			"angle": current_input_angle
 		}
 		socket.send_text(JSON.stringify(msg))
 
