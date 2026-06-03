@@ -115,10 +115,17 @@ func _on_join_pressed():
 	if OS.has_feature("web"):
 		var host = JavaScriptBridge.eval("window.location.host")
 		var protocol = JavaScriptBridge.eval("window.location.protocol")
+		var pathname = JavaScriptBridge.eval("window.location.pathname")
+		
 		var ws_protocol = "ws://"
 		if protocol == "https:":
 			ws_protocol = "wss://"
-		server_url = ws_protocol + host + "/archer/ws"
+			
+		var ws_path = "/ws"
+		if pathname != null and str(pathname).begins_with("/archer"):
+			ws_path = "/archer/ws"
+			
+		server_url = ws_protocol + host + ws_path
 	else:
 		# Fallback for local editor development
 		var server_input_text = $UI/Lobby/Panel/VBox/ServerInput.text.strip_edges()
