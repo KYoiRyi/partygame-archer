@@ -209,7 +209,8 @@ func _process(delta):
 	
 	# 2. Smooth Camera Follow
 	if my_player_data:
-		var my_smooth_pos = smooth_positions.get(client_id, Vector2(my_player_data.pos.x, my_player_data.pos.y))
+		var pos_dict = my_player_data.get("pos", {"x": 0.0, "y": 0.0})
+		var my_smooth_pos = smooth_positions.get(client_id, Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0)))
 		var target_cam_pos = my_smooth_pos
 		# Clamp camera inside map bounds with some margin
 		target_cam_pos.x = clamp(target_cam_pos.x, 640, 3000 - 640)
@@ -223,7 +224,7 @@ func _process(delta):
 		$Camera2D.position = $Camera2D.position.lerp(target_cam_pos, 8.0 * delta) + shake_offset
 	
 	# 3. Process Input (If connected and not chatting)
-	if is_connected and not is_chatting and my_player_data and not my_player_data.dead:
+	if is_connected and not is_chatting and my_player_data and not my_player_data.get("dead", false):
 		_process_movement_input(delta)
 		_process_aiming_input(delta)
 		
@@ -272,7 +273,8 @@ func _process_aiming_input(delta):
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		var mouse_pos = get_global_mouse_position()
 		if my_player_data:
-			var p_pos = Vector2(my_player_data.pos.x, my_player_data.pos.y)
+			var pos_dict = my_player_data.get("pos", {"x": 0.0, "y": 0.0})
+			var p_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
 			var angle = (mouse_pos - p_pos).angle()
 			
 			var msg = {
@@ -321,27 +323,28 @@ func _handle_server_message(data: Dictionary):
 			# Find my player data
 			my_player_data = null
 			for p in game_state.get("players", []):
-				if p.id == client_id:
+				if p.get("id", "") == client_id:
 					my_player_data = p
 					break
 			
 			# Update HUD
 			if my_player_data:
-				$UI/HUD/XPBar.max_value = my_player_data.xp_to_next
-				$UI/HUD/XPBar.value = my_player_data.xp
-				$UI/HUD/HPBar.max_value = my_player_data.max_hp
-				$UI/HUD/HPBar.value = my_player_data.hp
-				$UI/HUD/TopPanel/Stats.text = "Lvl: " + str(my_player_data.level) + " | Score: " + str(my_player_data.score)
+				$UI/HUD/XPBar.max_value = my_player_data.get("xp_to_next", 100)
+				$UI/HUD/XPBar.value = my_player_data.get("xp", 0)
+				$UI/HUD/HPBar.max_value = my_player_data.get("max_hp", 100)
+				$UI/HUD/HPBar.value = my_player_data.get("hp", 0)
+				$UI/HUD/TopPanel/Stats.text = "Lvl: " + str(my_player_data.get("level", 1)) + " | Score: " + str(my_player_data.get("score", 0))
 				
-				if my_player_data.dead:
-					$UI/HUD/TopPanel/Stats.text = "☠️ DEAD (Respawning...) | Lvl: " + str(my_player_data.level) + " | Score: " + str(my_player_data.score)
+				if my_player_data.get("dead", false):
+					$UI/HUD/TopPanel/Stats.text = "☠️ DEAD (Respawning...) | Lvl: " + str(my_player_data.get("level", 1)) + " | Score: " + str(my_player_data.get("score", 0))
 			
 			# Core base health updates
 			var blue_core_hp = "0"
 			var red_core_hp = "0"
 			for t in game_state.get("towers", []):
-				if t.id == "blue_base": blue_core_hp = str(int(t.hp))
-				if t.id == "red_base": red_core_hp = str(int(t.hp))
+				var t_id = t.get("id", "")
+				if t_id == "blue_base": blue_core_hp = str(int(t.get("hp", 0.0)))
+				if t_id == "red_base": red_core_hp = str(int(t.get("hp", 0.0)))
 			$UI/HUD/TopPanel/BaseHPs.text = "Blue Core: " + blue_core_hp + " | Red Core: " + red_core_hp
 			
 			# Check damage events for Juice (Screen shakes & Damage Texts)
@@ -533,8 +536,13 @@ func _on_world_draw():
 
 	# Draw Gems
 	for g in game_state.get("gems", []):
-		var g_pos = smooth_positions.get(g.id, Vector2(g.pos.x, g.pos.y))
-		if g.type == "hp":
+		var g_id = g.get("id", "")
+		var g_pos = smooth_positions.get(g_id)
+		if g_pos == null:
+			var pos_dict = g.get("pos", {"x": 0.0, "y": 0.0})
+			g_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			
+		if g.get("type", "xp") == "hp":
 			# HP: red cross
 			world_node.draw_rect(Rect2(g_pos.x - 7, g_pos.y - 3, 14, 6), Color(1.0, 0.2, 0.2), true)
 			world_node.draw_rect(Rect2(g_pos.x - 3, g_pos.y - 7, 6, 14), Color(1.0, 0.2, 0.2), true)
@@ -551,16 +559,23 @@ func _on_world_draw():
 
 	# Draw Projectiles/Arrows
 	for proj in game_state.get("projectiles", []):
-		var p_pos = smooth_positions.get(proj.id, Vector2(proj.pos.x, proj.pos.y))
-		var vel = Vector2(proj.vel.x, proj.vel.y).normalized()
+		var proj_id = proj.get("id", "")
+		var p_pos = smooth_positions.get(proj_id)
+		if p_pos == null:
+			var pos_dict = proj.get("pos", {"x": 0.0, "y": 0.0})
+			p_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			
+		var vel_dict = proj.get("vel", {"x": 1.0, "y": 0.0})
+		var vel = Vector2(vel_dict.get("x", 1.0), vel_dict.get("y", 0.0)).normalized()
 		
 		# Draw arrow stick
 		var length = 22.0
 		var start_p = p_pos - vel * length
 		var arrow_color = Color(1.0, 0.85, 0.3)
-		if proj.team == "blue":
+		var proj_team = proj.get("team", "blue")
+		if proj_team == "blue":
 			arrow_color = Color(0.4, 0.7, 1.0)
-		elif proj.team == "red":
+		elif proj_team == "red":
 			arrow_color = Color(1.0, 0.4, 0.4)
 			
 		world_node.draw_line(start_p, p_pos, arrow_color, 3.0)
@@ -576,11 +591,13 @@ func _on_world_draw():
 
 	# Draw Towers & Core Bases
 	for t in game_state.get("towers", []):
-		var t_pos = Vector2(t.pos.x, t.pos.y)
-		var t_color = Color(0.3, 0.5, 1.0) if t.team == "blue" else Color(1.0, 0.3, 0.3)
-		var range_color = Color(0.3, 0.5, 1.0, 0.08) if t.team == "blue" else Color(1.0, 0.3, 0.3, 0.08)
+		var pos_dict = t.get("pos", {"x": 0.0, "y": 0.0})
+		var t_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+		var t_team = t.get("team", "blue")
+		var t_color = Color(0.3, 0.5, 1.0) if t_team == "blue" else Color(1.0, 0.3, 0.3)
+		var range_color = Color(0.3, 0.5, 1.0, 0.08) if t_team == "blue" else Color(1.0, 0.3, 0.3, 0.08)
 		
-		if t.is_base:
+		if t.get("is_base", false):
 			# Draw Giant Base Octagon
 			var base_radius = 80.0
 			var pts = PackedVector2Array()
@@ -600,7 +617,7 @@ func _on_world_draw():
 			world_node.draw_circle(t_pos, 550.0, t_color * Color(1.0, 1.0, 1.0, 0.3), false, 2.0)
 			
 			# Base HP bar
-			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -95), t.hp, t.max_hp, 150, 12)
+			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -95), t.get("hp", 0.0), t.get("max_hp", 1.0), 150, 12)
 		else:
 			# Standard Defense Tower
 			world_node.draw_circle(t_pos, 45.0, Color(0.18, 0.22, 0.26))
@@ -612,35 +629,50 @@ func _on_world_draw():
 			world_node.draw_circle(t_pos, 400.0, t_color * Color(1.0, 1.0, 1.0, 0.3), false, 1.5)
 			
 			# HP bar
-			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -60), t.hp, t.max_hp, 80, 8)
+			_draw_entity_health_bar(world_node, t_pos + Vector2(0, -60), t.get("hp", 0.0), t.get("max_hp", 1.0), 80, 8)
 
 	# Draw Minions
 	for m in game_state.get("minions", []):
-		var m_pos = smooth_positions.get(m.id, Vector2(m.pos.x, m.pos.y))
-		var m_color = Color(0.4, 0.6, 1.0) if m.team == "blue" else Color(1.0, 0.5, 0.5)
+		var m_id = m.get("id", "")
+		var m_pos = smooth_positions.get(m_id)
+		if m_pos == null:
+			var pos_dict = m.get("pos", {"x": 0.0, "y": 0.0})
+			m_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			
+		var m_team = m.get("team", "blue")
+		var m_color = Color(0.4, 0.6, 1.0) if m_team == "blue" else Color(1.0, 0.5, 0.5)
 		
 		# Draw minion circle body
 		world_node.draw_circle(m_pos, 18.0, m_color)
 		world_node.draw_circle(m_pos, 18.0, Color.BLACK, false, 1.5)
 		
 		# Eyes/indicator
-		var target_vel = Vector2(m.target_x - m_pos.x, m.target_y - m_pos.y).normalized()
+		var target_vel = Vector2(m.get("target_x", 0.0) - m_pos.x, m.get("target_y", 0.0) - m_pos.y).normalized()
 		world_node.draw_line(m_pos, m_pos + target_vel * 15.0, Color.BLACK, 3.0)
 		
 		# HP bar
-		_draw_entity_health_bar(world_node, m_pos + Vector2(0, -25), m.hp, m.max_hp, 30, 4)
+		_draw_entity_health_bar(world_node, m_pos + Vector2(0, -25), m.get("hp", 0.0), m.get("max_hp", 1.0), 30, 4)
 
 	# Draw Players
 	for p in game_state.get("players", []):
-		var p_pos = smooth_positions.get(p.id, Vector2(p.pos.x, p.pos.y))
-		if p.dead:
+		var p_id = p.get("id", "")
+		if p_id == "": continue
+		
+		var p_pos = smooth_positions.get(p_id)
+		if p_pos == null:
+			var pos_dict = p.get("pos", {"x": 0.0, "y": 0.0})
+			p_pos = Vector2(pos_dict.get("x", 0.0), pos_dict.get("y", 0.0))
+			
+		if p.get("dead", false):
 			# Draw small dead marker if not me, or standard if me
-			if p.id == client_id:
+			if p_id == client_id:
 				world_node.draw_string(system_font, p_pos, "☠️ RESPAWNING...", HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color.RED)
 			continue
-		var p_color = Color(0.3, 0.5, 1.0) if p.team == "blue" else Color(1.0, 0.3, 0.3)
+			
+		var p_team = p.get("team", "blue")
+		var p_color = Color(0.3, 0.5, 1.0) if p_team == "blue" else Color(1.0, 0.3, 0.3)
 		var accent_color = Color.WHITE
-		if p.id == client_id:
+		if p_id == client_id:
 			accent_color = Color(1.0, 0.9, 0.3) # Gold outline for current client player!
 		
 		# Check if player is hiding in bushes
@@ -653,11 +685,12 @@ func _on_world_draw():
 		var p_alpha = 1.0
 		if is_stealthy:
 			# Hide from enemies if they are outside, but show transparent to allies
-			if p.team != my_team:
+			if p_team != my_team:
 				# Check if my player is also in the SAME bush, otherwise he is fully hidden!
 				var am_i_near_bush = false
 				if my_player_data:
-					var my_curr_pos = Vector2(my_player_data.pos.x, my_player_data.pos.y)
+					var my_pos_dict = my_player_data.get("pos", {"x": 0.0, "y": 0.0})
+					var my_curr_pos = Vector2(my_pos_dict.get("x", 0.0), my_pos_dict.get("y", 0.0))
 					for b in grass_bushes:
 						if my_curr_pos.distance_to(b.pos) < b.radius and p_pos.distance_to(b.pos) < b.radius:
 							am_i_near_bush = true
@@ -677,19 +710,20 @@ func _on_world_draw():
 		world_node.draw_circle(p_pos, 8.0, Color(0, 0, 0, p_alpha * 0.4))
 		
 		# Facing Nose (Gun pointer)
-		var f_dir = Vector2(cos(p.angle), sin(p.angle))
+		var angle = p.get("angle", 0.0)
+		var f_dir = Vector2(cos(angle), sin(angle))
 		world_node.draw_line(p_pos, p_pos + f_dir * 33.0, acc, 4.0)
 		world_node.draw_line(p_pos, p_pos + f_dir * 33.0, col, 2.0)
 		
 		# Name plate and Level badge
-		var p_name = p.name
+		var p_name = p.get("name", "Archer")
 		if p.get("is_bot", false):
 			p_name = "🤖 " + p_name
-		var badge_str = "Lvl " + str(p.level) + " " + p_name
+		var badge_str = "Lvl " + str(p.get("level", 1)) + " " + p_name
 		world_node.draw_string(system_font, p_pos + Vector2(-60, -42), badge_str, HORIZONTAL_ALIGNMENT_CENTER, 120, 12, acc)
 		
 		# Health Bar
-		_draw_entity_health_bar(world_node, p_pos + Vector2(0, -32), p.hp, p.max_hp, 45, 5, p_alpha)
+		_draw_entity_health_bar(world_node, p_pos + Vector2(0, -32), p.get("hp", 0.0), p.get("max_hp", 1.0), 45, 5, p_alpha)
 
 	# Draw Hit Sparks particles
 	for s in hit_sparks:
