@@ -48,6 +48,7 @@ type Player struct {
 	IceTimer      float64        `json:"ice_timer"`
 	PoisonTimer   float64        `json:"poison_timer"`
 	IsBot         bool           `json:"is_bot"`
+	Hero          string         `json:"hero"`
 
 	// Send/Receive
 	send chan []byte

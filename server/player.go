@@ -112,6 +112,14 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "Archer"
 	}
+	
+	heroCode := r.URL.Query().Get("hero")
+	heroClass := "ranger"
+	if heroCode == "1" {
+		heroClass = "knight"
+	} else if heroCode == "2" {
+		heroClass = "mage"
+	}
 
 	playerID := fmt.Sprintf("player_%d", time.Now().UnixNano())
 
@@ -120,6 +128,7 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		Name:     name,
 		send:     make(chan []byte, 256),
 		conn:     conn,
+		Hero:     heroClass,
 	}
 
 	// 2. Fetch or create a game room

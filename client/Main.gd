@@ -42,6 +42,7 @@ var aim_active: bool = false
 var aim_center: Vector2 = Vector2.ZERO
 var aim_pos: Vector2 = Vector2.ZERO
 var aim_touch_index: int = -1
+var hero_select_btn: OptionButton
 
 # --- Skill Mapping ---
 const SKILL_NAMES = {
@@ -70,6 +71,15 @@ func _ready():
 	
 	# Automatically hide the ServerInput LineEdit to avoid UI confusion
 	$UI/Lobby/Panel/VBox/ServerInput.visible = false
+	
+	# Dynamic OptionButton for Hero Selection
+	hero_select_btn = OptionButton.new()
+	hero_select_btn.add_item("🏹 Ranger (Multi Shot Lvl 1, Speed 300)", 0)
+	hero_select_btn.add_item("🛡️ Knight (HP Boost Lvl 1, HP 150)", 1)
+	hero_select_btn.add_item("🔥 Mage (Fire Arrow Lvl 1, Speed 260)", 2)
+	hero_select_btn.selected = 0
+	$UI/Lobby/Panel/VBox.add_child(hero_select_btn)
+	$UI/Lobby/Panel/VBox.move_child(hero_select_btn, $UI/Lobby/Panel/VBox.get_child_count() - 2)
 	
 	# 1. Connect UI Signals
 	$UI/Lobby/Panel/VBox/JoinButton.pressed.connect(_on_join_pressed)
@@ -294,8 +304,9 @@ func _on_join_pressed():
 		else:
 			server_url = "ws://localhost:8090/ws"
 		
-	# Append query param for nickname
-	var ws_url = server_url + "?name=" + nickname.uri_encode()
+	# Append query param for nickname and hero class selection
+	var selected_hero_idx = hero_select_btn.selected
+	var ws_url = server_url + "?name=" + nickname.uri_encode() + "&hero=" + str(selected_hero_idx)
 	
 	add_chat_message("System", "Connecting to " + ws_url + "...")
 	
@@ -1028,7 +1039,22 @@ func _on_world_draw():
 		
 		# Cybernetic armor core
 		world_node.draw_circle(p_pos, base_r, Color(0.08, 0.1, 0.13, p_alpha))
-		world_node.draw_circle(p_pos, base_r - 4.0, col)
+		
+		# Draw styling according to Hero class
+		var hero_class_str = _get_safe_string(p, "hero", "ranger")
+		if hero_class_str == "knight":
+			# Knight: heavy gold trim
+			world_node.draw_circle(p_pos, base_r - 2.0, Color(0.8, 0.6, 0.1, p_alpha))
+			world_node.draw_circle(p_pos, base_r - 5.0, col)
+		elif hero_class_str == "mage":
+			# Mage: glowing energy core with violet orbit
+			world_node.draw_circle(p_pos, base_r - 4.0, col)
+			var magic_a = time_ms * 0.004
+			var glyph_pos = p_pos + Vector2(cos(magic_a), sin(magic_a)) * (base_r - 6.0)
+			world_node.draw_circle(glyph_pos, 3.0, Color(0.7, 0.3, 1.0, p_alpha))
+		else:
+			# Ranger: standard core
+			world_node.draw_circle(p_pos, base_r - 4.0, col)
 		
 		# Energy center
 		world_node.draw_circle(p_pos, 8.0, Color.WHITE * Color(1, 1, 1, p_alpha * 0.9))
@@ -1070,7 +1096,15 @@ func _on_world_draw():
 		var p_name = _get_safe_string(p, "name", "Archer")
 		if _get_safe_bool(p, "is_bot", false):
 			p_name = "🤖 " + p_name
-		var badge_str = "Lvl " + str(_get_safe_int(p, "level", 1)) + " " + p_name
+			
+		var hero_cls = _get_safe_string(p, "hero", "ranger")
+		var hero_emoji = "🏹"
+		if hero_cls == "knight":
+			hero_emoji = "🛡️"
+		elif hero_cls == "mage":
+			hero_emoji = "🔥"
+			
+		var badge_str = "Lvl " + str(_get_safe_int(p, "level", 1)) + " " + hero_emoji + " " + p_name
 		world_node.draw_string(system_font, p_pos + Vector2(-60, -42), badge_str, HORIZONTAL_ALIGNMENT_CENTER, 120, 12, acc)
 		
 		# Health Bar

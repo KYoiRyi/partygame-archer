@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"sync"
@@ -129,9 +130,11 @@ func (r *Room) Start() {
 	go func() {
 		defer ticker.Stop()
 		lastTick := time.Now()
+		ticks := 0
 		for {
 			select {
 			case <-r.stopChan:
+				log.Printf("Room %s: stopping main loop", r.ID)
 				return
 			case p := <-r.register:
 				r.handleRegister(p)
@@ -147,6 +150,17 @@ func (r *Room) Start() {
 				r.mu.Lock()
 				r.tick(dt)
 				r.mu.Unlock()
+
+				ticks++
+				if ticks%150 == 0 {
+					r.mu.Lock()
+					numPlayers := len(r.Players)
+					numMinions := len(r.Minions)
+					numProjectiles := len(r.Projectiles)
+					numGems := len(r.Gems)
+					r.mu.Unlock()
+					log.Printf("Room %s status: %d players, %d minions, %d projectiles, %d gems. Loop is running smoothly.", r.ID, numPlayers, numMinions, numProjectiles, numGems)
+				}
 			}
 		}
 	}()
@@ -168,9 +182,42 @@ func (r *Room) HandleInput(playerID string, msg ClientMessage) {
 	r.inputChan <- playerInput{playerID: playerID, msg: msg}
 }
 
+func initPlayerStats(p *Player, hero string) {
+	p.Hero = hero
+	p.Skills = make(map[string]int)
+	p.Level = 1
+	p.XP = 0
+	p.XPToNext = 50
+	p.Score = 0
+	p.Dead = false
+
+	switch hero {
+	case "knight":
+		p.MaxHP = 150.0
+		p.HP = 150.0
+		p.Speed = 240.0
+		p.Skills[SkillHpBoost] = 1
+	case "mage":
+		p.MaxHP = 90.0
+		p.HP = 90.0
+		p.Speed = 260.0
+		p.Skills[SkillFireArrow] = 1
+	case "ranger":
+		fallthrough
+	default:
+		p.Hero = "ranger"
+		p.MaxHP = 100.0
+		p.HP = 100.0
+		p.Speed = 300.0
+		p.Skills[SkillMultiShot] = 1
+	}
+}
+
 func (r *Room) handleRegister(p *Player) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	log.Printf("Registering player ID: %s, Name: %s, Hero: %s", p.ID, p.Name, p.Hero)
 
 	// Assign balanced team
 	blueCount, redCount := 0, 0
@@ -197,16 +244,7 @@ func (r *Room) handleRegister(p *Player) {
 		}
 	}
 	
-	p.Skills = make(map[string]int)
-	p.Level = 1
-	p.XP = 0
-	p.XPToNext = 50
-	p.MaxHP = 100
-	p.HP = 100
-	p.Speed = 280.0
-	p.Score = 0
-	p.Dead = false
-	
+	initPlayerStats(p, p.Hero)
 	r.respawnPlayer(p)
 	
 	if botToKick != nil {
@@ -222,14 +260,18 @@ func (r *Room) handleRegister(p *Player) {
 		Walls:    r.Walls,
 	}
 	if data, err := json.Marshal(initMsg); err == nil {
-		p.send <- data
+		select {
+		case p.send <- data:
+		default:
+			log.Printf("Warning: failed to send init msg to player %s, channel full/closed", p.ID)
+		}
 	}
 
 	// Chat broadcast join
 	if botToKick != nil {
-		r.broadcastChat("system", fmt.Sprintf("%s joined the %s team (replaced AI %s)!", p.Name, p.Team, botToKick.Name))
+		r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the %s team (replaced AI %s)!", p.Name, p.Hero, p.Team, botToKick.Name))
 	} else {
-		r.broadcastChat("system", fmt.Sprintf("%s joined the %s team!", p.Name, p.Team))
+		r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the %s team!", p.Name, p.Hero, p.Team))
 	}
 }
 
@@ -356,7 +398,17 @@ func (r *Room) playerShoot(p *Player, baseAngle float64) {
 	// Base Stats
 	baseDamage := 15.0 + float64(p.Skills[SkillDamageBoost])*5
 	atkSpeedLvl := float64(p.Skills[SkillAtkSpeed])
-	p.ShootCooldown = 0.5 * math.Pow(0.85, atkSpeedLvl) // 15% CDR per level
+	
+	baseCooldown := 0.25
+	switch p.Hero {
+	case "knight":
+		baseCooldown = 0.40
+	case "mage":
+		baseCooldown = 0.35
+	case "ranger":
+		baseCooldown = 0.25
+	}
+	p.ShootCooldown = baseCooldown * math.Pow(0.85, atkSpeedLvl) // 15% CDR per level
 
 	projectileSpeed := 600.0
 	life := 1.2 // seconds
@@ -766,6 +818,18 @@ func (r *Room) collectGem(p *Player, g *Gem) {
 }
 
 func (r *Room) triggerLevelUp(p *Player) {
+	if p.IsBot {
+		skillsPool := []string{
+			SkillMultiShot, SkillDiagonal, SkillRearShot, SkillPiercing,
+			SkillBouncing, SkillFireArrow, SkillIceArrow, SkillPoisonArrow,
+			SkillHpBoost, SkillSpeedBoost, SkillAtkSpeed, SkillDamageBoost,
+		}
+		selectedSkill := skillsPool[rand.Intn(len(skillsPool))]
+		r.playerSelectSkill(p, selectedSkill)
+		log.Printf("Bot %s (level %d) auto-selected skill: %s", p.Name, p.Level, selectedSkill)
+		return
+	}
+
 	skillsPool := []string{
 		SkillMultiShot, SkillDiagonal, SkillRearShot, SkillPiercing,
 		SkillBouncing, SkillFireArrow, SkillIceArrow, SkillPoisonArrow,
@@ -785,7 +849,11 @@ func (r *Room) triggerLevelUp(p *Player) {
 	}
 	
 	if data, err := json.Marshal(msg); err == nil {
-		p.send <- data
+		select {
+		case p.send <- data:
+		default:
+			log.Printf("Warning: failed to send levelup choices to player %s, channel full/closed", p.ID)
+		}
 	}
 }
 
@@ -1213,23 +1281,20 @@ func (r *Room) spawnBot(team string) {
 	botID := r.nextID("bot")
 	
 	p := &Player{
-		ID:            botID,
-		Name:          name,
-		Team:          team,
-		Skills:        make(map[string]int),
-		Level:         1,
-		XP:            0,
-		XPToNext:      50,
-		MaxHP:         100,
-		HP:            100,
-		Speed:         240.0,
-		Score:         0,
-		Dead:          false,
-		IsBot:         true,
+		ID:    botID,
+		Name:  name,
+		Team:  team,
+		IsBot: true,
 	}
+	
+	heroes := []string{"ranger", "knight", "mage"}
+	randomHero := heroes[rand.Intn(len(heroes))]
+	initPlayerStats(p, randomHero)
 	
 	r.respawnPlayer(p)
 	r.Players[botID] = p
+	
+	log.Printf("Spawned Bot ID: %s, Name: %s, Team: %s, Hero: %s", botID, name, team, randomHero)
 }
 
 func (r *Room) updateBotAI(p *Player, dt float64) {
