@@ -59,17 +59,35 @@ IP_LIST=$(ip addr show | grep -w inet | grep -v 127.0.0.1 | awk '{print $2}' | c
 # Make sure executable permissions are set
 chmod +x game_server
 
+# Ask for SSL mode (HTTPS)
+echo -e "${YELLOW}------------------------------------------------------${NC}"
+echo -e "${YELLOW}Do you want to run the server in HTTPS (SSL) mode? (y/N)${NC}"
+echo -e "${YELLOW}(Required for Wi-Fi LAN multiplayer due to browser security restrictions)${NC}"
+echo -e "${YELLOW}Default is 'n' (HTTP mode) after 5 seconds.${NC}"
+read -r -t 5 -p "Selection: " SSL_ANSWER || SSL_ANSWER="n"
+echo ""
+
+SSL_FLAG=""
+PROTOCOL="http"
+if [[ "$SSL_ANSWER" =~ ^[Yy]$ ]]; then
+    SSL_FLAG="-ssl"
+    PROTOCOL="https"
+    echo -e "${GREEN}[✔] Running in HTTPS/SSL mode.${NC}"
+else
+    echo -e "${GREEN}[✔] Running in HTTP mode.${NC}"
+fi
+
 echo -e "${BLUE}======================================================${NC}"
 echo -e "${GREEN}      SERVER IS READY TO RUN ON PORT 8090!            ${NC}"
 echo -e "${BLUE}======================================================${NC}"
 echo -e "${YELLOW}To play on this Android device, open:${NC}"
-echo -e "   👉 ${GREEN}http://localhost:8090${NC}"
+echo -e "   👉 ${GREEN}${PROTOCOL}://localhost:8090${NC}"
 echo ""
 if [ -n "$IP_LIST" ]; then
     echo -e "${YELLOW}To play with friends on the same Wi-Fi network,${NC}"
     echo -e "${YELLOW}have them open one of these links on their browser:${NC}"
     for ip in $IP_LIST; do
-        echo -e "   👉 ${GREEN}http://$ip:8090${NC}"
+        echo -e "   👉 ${GREEN}${PROTOCOL}://$ip:8090${NC}"
     done
 fi
 echo -e "${BLUE}======================================================${NC}"
@@ -77,4 +95,4 @@ echo -e "${YELLOW}Press Ctrl+C to stop the server.${NC}"
 echo -e "${BLUE}======================================================${NC}"
 
 # 6. Run the server
-./game_server -port=8090
+./game_server -port=8090 $SSL_FLAG
