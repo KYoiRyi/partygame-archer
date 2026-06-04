@@ -81,17 +81,27 @@ var last_touch_time: int = 0
 # --- Account & Room Management State ---
 var auth_token: String = ""
 var auth_username: String = ""
-var is_guest: bool = true
+var is_guest: bool = false
 var user_stats: Dictionary = {"kills": 0, "wins": 0, "played": 0}
-var http_node: HTTPRequest
 var selected_room_id: String = ""
-var login_panel: Control
-var menu_panel: Control
 
-func _save_token(token: String, username: String):
+# Server Configuration
+var server_host: String = "localhost"
+var server_port: String = "8080"
+
+# UI Panels
+var server_panel: Control
+var auth_panel: Control
+var profile_panel: Control
+var room_panel: Control
+
+func _save_token(token: String, username: String, host: String, port: String):
 	var f = FileAccess.open("user://auth_token.txt", FileAccess.WRITE)
 	if f:
-		f.store_string(token + "\n" + username)
+		f.store_line(token)
+		f.store_line(username)
+		f.store_line(host)
+		f.store_line(port)
 
 func _load_token() -> Dictionary:
 	if FileAccess.file_exists("user://auth_token.txt"):
@@ -99,18 +109,24 @@ func _load_token() -> Dictionary:
 		if f:
 			var token = f.get_line().strip_edges()
 			var username = f.get_line().strip_edges()
-			return {"token": token, "username": username}
+			var host = f.get_line().strip_edges()
+			var port = f.get_line().strip_edges()
+			if host == "": host = "localhost"
+			if port == "": port = "8080"
+			return {"token": token, "username": username, "host": host, "port": port}
 	return {}
 
 func _ready():
 	system_font = ThemeDB.fallback_font
 	
-	# Create HTTPRequest node
-	http_node = HTTPRequest.new()
-	add_child(http_node)
-	http_node.request_completed.connect(_on_http_request_completed)
+	# Load saved configurations
+	var saved = _load_token()
+	if saved.has("host"): server_host = saved["host"]
+	if saved.has("port"): server_port = saved["port"]
+	if saved.has("token"): auth_token = saved["token"]
+	if saved.has("username"): auth_username = saved["username"]
 	
-	# Dynamically build Lobby UI
+	# Dynamically build all Lobby Panels
 	_create_lobby_ui()
 	
 	# Connect HUD signals
@@ -127,9 +143,9 @@ func _ready():
 	# Create programmatic HUD overlay for Touch Joystick drawing
 	joystick_draw_node = Control.new()
 	joystick_draw_node.name = "JoystickHUD"
+	$UI/HUD.add_child(joystick_draw_node)
 	joystick_draw_node.set_anchors_preset(Control.PRESET_FULL_RECT)
 	joystick_draw_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	$UI/HUD.add_child(joystick_draw_node)
 	joystick_draw_node.draw.connect(_on_joystick_draw)
 	
 	# Generate fixed symmetric grass/stealth bushes for a clear, readable map
@@ -149,6 +165,7 @@ func _ready():
 	dash_btn.name = "DashButton"
 	dash_btn.text = "⚡ DASH"
 	dash_btn.add_theme_font_size_override("font_size", 22)
+	$UI/HUD.add_child(dash_btn)
 	dash_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	dash_btn.offset_left = -260
 	dash_btn.offset_top = -200
@@ -162,7 +179,6 @@ func _ready():
 	sb.corner_radius_bottom_right = 40
 	dash_btn.add_theme_stylebox_override("normal", sb)
 	dash_btn.pressed.connect(_on_dash_pressed)
-	$UI/HUD.add_child(dash_btn)
 	
 	# Initial window setup
 	get_viewport().files_dropped.connect(func(files): pass)
@@ -190,49 +206,15 @@ func _ready():
 	# Force 60 FPS to fix stuttering
 	Engine.max_fps = 60
 	
-	# Attempt Auto-Login if saved token exists
-	var saved = _load_token()
-	if saved.has("token") and saved.has("username"):
-		auth_token = saved["token"]
-		auth_username = saved["username"]
-		
-		# Validate token & fetch profile stats
-		var api_base = _get_http_api_base()
-		var url = api_base + "/api/profile?token=" + auth_token.uri_encode()
-		
-		var auto_http = HTTPRequest.new()
-		add_child(auto_http)
-		auto_http.request_completed.connect(func(res, code, hdrs, bdy):
-			if res == HTTPRequest.RESULT_SUCCESS and code == 200:
-				var data_str = bdy.get_string_from_utf8()
-				var data = JSON.parse_string(data_str)
-				if data is Dictionary and data.get("ok") == true:
-					is_guest = false
-					user_stats = {
-						"kills": int(data.get("total_kills", 0)),
-						"wins": int(data.get("total_wins", 0)),
-						"played": int(data.get("games_played", 0))
-					}
-					var hero = data.get("hero", "ranger")
-					var hero_idx = 0
-					match hero:
-						"knight": hero_idx = 1
-						"mage": hero_idx = 2
-						"assassin": hero_idx = 3
-						"sniper": hero_idx = 4
-					if hero_select_btn:
-						hero_select_btn.selected = hero_idx
-					_show_menu_panel()
-			auto_http.queue_free()
-		)
-		auto_http.request(url, [], HTTPClient.METHOD_GET)
+	# Always show server config panel first on start
+	_show_server_config_panel()
 
 func _on_dash_pressed():
 	if client_dash_cooldown <= 0 and is_connected and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
 		client_dash_cooldown = 2.0
 		socket.send_text(JSON.stringify({"type": "dash"}))
 
-func _input(event: InputEvent):
+func _unhandled_input(event: InputEvent):
 	if not is_connected or not (my_player_data is Dictionary) or _get_safe_bool(my_player_data, "dead", false):
 		# Cleanup if we disconnected or died
 		if joystick_active or aim_active or mouse_aim_active:
@@ -391,18 +373,18 @@ func _create_lobby_ui():
 	if has_node("UI/Lobby/Panel"):
 		$UI/Lobby/Panel.visible = false
 		
-	# Create Custom BG Flat style
+	# Create Custom BG Flat style (Full Screen Dark Blue Space Tech)
 	var bg_panel = Panel.new()
 	bg_panel.name = "CustomBG"
+	$UI/Lobby.add_child(bg_panel)
 	bg_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var bg_style = StyleBoxFlat.new()
 	bg_style.bg_color = Color(0.04, 0.05, 0.08, 0.96)
 	bg_panel.add_theme_stylebox_override("panel", bg_style)
-	$UI/Lobby.add_child(bg_panel)
 
-	# Box Style
+	# Box Style (Glassmorphism rounded border)
 	var box_style = StyleBoxFlat.new()
-	box_style.bg_color = Color(0.08, 0.12, 0.18, 0.85)
+	box_style.bg_color = Color(0.08, 0.12, 0.18, 0.9)
 	box_style.border_width_left = 2
 	box_style.border_width_top = 2
 	box_style.border_width_right = 2
@@ -414,47 +396,134 @@ func _create_lobby_ui():
 	box_style.corner_radius_bottom_right = 16
 	box_style.shadow_color = Color(0.0, 0.5, 1.0, 0.2)
 	box_style.shadow_size = 12
+
+	# If Web, prefill from browser URL
+	if OS.has_feature("web"):
+		var window_host = JavaScriptBridge.eval("window.location.hostname")
+		var window_port = JavaScriptBridge.eval("window.location.port")
+		if window_host != null and str(window_host) != "":
+			server_host = str(window_host)
+		if window_port != null and str(window_port) != "":
+			server_port = str(window_port)
+		else:
+			var proto = JavaScriptBridge.eval("window.location.protocol")
+			if str(proto) == "https:":
+				server_port = "443"
+			else:
+				server_port = "80"
+
+	# ----------------------------------------------------
+	# SCREEN 1: SERVER CONFIG PANEL
+	# ----------------------------------------------------
+	server_panel = Control.new()
+	server_panel.name = "ServerConfigPanel"
+	$UI/Lobby.add_child(server_panel)
+	server_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	
-	# 1. Login Panel
-	login_panel = Control.new()
-	login_panel.name = "AccountPanel"
-	login_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	$UI/Lobby.add_child(login_panel)
+	var srv_box = PanelContainer.new()
+	srv_box.custom_minimum_size = Vector2(420, 320)
+	server_panel.add_child(srv_box)
+	srv_box.set_anchors_preset(Control.PRESET_CENTER)
+	srv_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	srv_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	srv_box.add_theme_stylebox_override("panel", box_style)
 	
-	var login_box = PanelContainer.new()
-	login_box.custom_minimum_size = Vector2(400, 380)
-	login_box.set_anchors_preset(Control.PRESET_CENTER)
-	login_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	login_box.grow_vertical = Control.GROW_DIRECTION_BOTH
-	login_box.add_theme_stylebox_override("panel", box_style)
-	login_panel.add_child(login_box)
+	var svbox = VBoxContainer.new()
+	svbox.add_theme_constant_override("separation", 15)
+	svbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	srv_box.add_child(svbox)
 	
-	var vbox = VBoxContainer.new()
-	vbox.name = "VBoxContainer"
-	vbox.add_theme_constant_override("separation", 15)
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	login_box.add_child(vbox)
+	var s_title = Label.new()
+	s_title.text = "🔌 CONNECT TO SERVER 🎮"
+	s_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	s_title.add_theme_font_size_override("font_size", 22)
+	s_title.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
+	svbox.add_child(s_title)
 	
-	var title = Label.new()
-	title.text = "⚔️ ARCHER PARTY 🏹"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
-	vbox.add_child(title)
+	var s_desc = Label.new()
+	s_desc.text = "Enter server IP / Host address and Port"
+	s_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	s_desc.add_theme_font_size_override("font_size", 12)
+	s_desc.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	svbox.add_child(s_desc)
 	
-	var desc = Label.new()
-	desc.text = "Track your score, wins & kills in real-time"
-	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	desc.add_theme_font_size_override("font_size", 12)
-	desc.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
-	vbox.add_child(desc)
+	var host_input = LineEdit.new()
+	host_input.name = "HostInput"
+	host_input.placeholder_text = "IP Address / Host (e.g. localhost)..."
+	host_input.text = server_host
+	host_input.custom_minimum_size = Vector2(300, 36)
+	host_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	svbox.add_child(host_input)
+	
+	var port_input = LineEdit.new()
+	port_input.name = "PortInput"
+	port_input.placeholder_text = "Port (e.g. 8080)..."
+	port_input.text = server_port
+	port_input.custom_minimum_size = Vector2(300, 36)
+	port_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	svbox.add_child(port_input)
+	
+	# Hook up enter key connections in server config panel
+	host_input.text_submitted.connect(func(txt): port_input.grab_focus())
+	port_input.text_submitted.connect(func(txt): _on_connect_server_pressed(host_input.text, port_input.text))
+	
+	var s_err_lbl = Label.new()
+	s_err_lbl.name = "ErrorLabel"
+	s_err_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	s_err_lbl.add_theme_font_size_override("font_size", 12)
+	s_err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+	s_err_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	svbox.add_child(s_err_lbl)
+	
+	var connect_btn = Button.new()
+	connect_btn.text = "CONNECT TO SERVER"
+	connect_btn.custom_minimum_size = Vector2(250, 40)
+	connect_btn.pressed.connect(func(): _on_connect_server_pressed(host_input.text, port_input.text))
+	svbox.add_child(connect_btn)
+
+	# ----------------------------------------------------
+	# SCREEN 2: AUTHENTICATE PANEL
+	# ----------------------------------------------------
+	auth_panel = Control.new()
+	auth_panel.name = "AuthPanel"
+	auth_panel.visible = false
+	$UI/Lobby.add_child(auth_panel)
+	auth_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	
+	var auth_box = PanelContainer.new()
+	auth_box.custom_minimum_size = Vector2(400, 380)
+	auth_panel.add_child(auth_box)
+	auth_box.set_anchors_preset(Control.PRESET_CENTER)
+	auth_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	auth_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	auth_box.add_theme_stylebox_override("panel", box_style)
+	
+	var avbox = VBoxContainer.new()
+	avbox.add_theme_constant_override("separation", 15)
+	avbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	auth_box.add_child(avbox)
+	
+	var a_title = Label.new()
+	a_title.text = "🔑 ACCOUNT SIGN-IN 🏹"
+	a_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	a_title.add_theme_font_size_override("font_size", 22)
+	a_title.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
+	avbox.add_child(a_title)
+	
+	var a_desc = Label.new()
+	a_desc.text = "Log in or register to track stats & play"
+	a_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	a_desc.add_theme_font_size_override("font_size", 12)
+	a_desc.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	avbox.add_child(a_desc)
 	
 	var user_input = LineEdit.new()
 	user_input.name = "UsernameInput"
 	user_input.placeholder_text = "Enter Username..."
+	user_input.text = auth_username
 	user_input.custom_minimum_size = Vector2(300, 36)
 	user_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(user_input)
+	avbox.add_child(user_input)
 	
 	var pass_input = LineEdit.new()
 	pass_input.name = "PasswordInput"
@@ -462,61 +531,60 @@ func _create_lobby_ui():
 	pass_input.secret = true
 	pass_input.custom_minimum_size = Vector2(300, 36)
 	pass_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(pass_input)
+	avbox.add_child(pass_input)
 	
-	var err_label = Label.new()
-	err_label.name = "ErrorLabel"
-	err_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	err_label.add_theme_font_size_override("font_size", 12)
-	err_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
-	err_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(err_label)
+	# Hook up enter key connections in auth panel
+	user_input.text_submitted.connect(func(txt): pass_input.grab_focus())
+	pass_input.text_submitted.connect(func(txt): _on_auth_pressed(user_input.text, pass_input.text, false))
 	
-	var btn_hbox = HBoxContainer.new()
-	btn_hbox.add_theme_constant_override("separation", 15)
-	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_child(btn_hbox)
+	var a_err_lbl = Label.new()
+	a_err_lbl.name = "ErrorLabel"
+	a_err_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	a_err_lbl.add_theme_font_size_override("font_size", 12)
+	a_err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+	a_err_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	avbox.add_child(a_err_lbl)
+	
+	var a_btn_hbox = HBoxContainer.new()
+	a_btn_hbox.add_theme_constant_override("separation", 15)
+	a_btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	avbox.add_child(a_btn_hbox)
 	
 	var login_btn = Button.new()
 	login_btn.text = "LOG IN"
 	login_btn.custom_minimum_size = Vector2(120, 36)
 	login_btn.pressed.connect(func(): _on_auth_pressed(user_input.text, pass_input.text, false))
-	btn_hbox.add_child(login_btn)
+	a_btn_hbox.add_child(login_btn)
 	
 	var reg_btn = Button.new()
 	reg_btn.text = "REGISTER"
 	reg_btn.custom_minimum_size = Vector2(120, 36)
 	reg_btn.pressed.connect(func(): _on_auth_pressed(user_input.text, pass_input.text, true))
-	btn_hbox.add_child(reg_btn)
+	a_btn_hbox.add_child(reg_btn)
 	
-	var divider = Label.new()
-	divider.text = "— OR —"
-	divider.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	divider.add_theme_font_size_override("font_size", 11)
-	divider.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
-	vbox.add_child(divider)
-	
-	var guest_btn = Button.new()
-	guest_btn.text = "PLAY AS GUEST 👤"
-	guest_btn.custom_minimum_size = Vector2(250, 36)
-	guest_btn.pressed.connect(_on_guest_pressed)
-	vbox.add_child(guest_btn)
-	
-	# 2. Main Menu Panel (Room Management)
-	menu_panel = Control.new()
-	menu_panel.name = "MenuPanel"
-	menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	menu_panel.visible = false
-	$UI/Lobby.add_child(menu_panel)
+	var back_to_srv_btn = Button.new()
+	back_to_srv_btn.text = "⬅️ BACK TO SERVER CONFIG"
+	back_to_srv_btn.custom_minimum_size = Vector2(250, 30)
+	back_to_srv_btn.pressed.connect(_show_server_config_panel)
+	avbox.add_child(back_to_srv_btn)
+
+	# ----------------------------------------------------
+	# SCREEN 3: PROFILE / ROOM LIST PANEL
+	# ----------------------------------------------------
+	profile_panel = Control.new()
+	profile_panel.name = "ProfilePanel"
+	profile_panel.visible = false
+	$UI/Lobby.add_child(profile_panel)
+	profile_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	
 	var menu_box = PanelContainer.new()
 	menu_box.name = "PanelContainer"
 	menu_box.custom_minimum_size = Vector2(620, 520)
+	profile_panel.add_child(menu_box)
 	menu_box.set_anchors_preset(Control.PRESET_CENTER)
 	menu_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	menu_box.grow_vertical = Control.GROW_DIRECTION_BOTH
 	menu_box.add_theme_stylebox_override("panel", box_style)
-	menu_panel.add_child(menu_box)
 	
 	var mvbox = VBoxContainer.new()
 	mvbox.name = "VBoxContainer"
@@ -547,7 +615,7 @@ func _create_lobby_ui():
 	mvbox.add_child(config_hbox)
 	
 	var hero_lbl = Label.new()
-	hero_lbl.text = "Hero Class:"
+	hero_lbl.text = "Choose Hero:"
 	hero_lbl.add_theme_font_size_override("font_size", 13)
 	config_hbox.add_child(hero_lbl)
 	
@@ -561,19 +629,8 @@ func _create_lobby_ui():
 	hero_select_btn.item_selected.connect(_on_hero_class_selected)
 	config_hbox.add_child(hero_select_btn)
 	
-	var srv_lbl = Label.new()
-	srv_lbl.text = "Server:"
-	srv_lbl.add_theme_font_size_override("font_size", 13)
-	config_hbox.add_child(srv_lbl)
-	
-	var srv_input = LineEdit.new()
-	srv_input.name = "ServerInput"
-	srv_input.text = "ws://localhost:8080/ws"
-	srv_input.custom_minimum_size = Vector2(200, 30)
-	config_hbox.add_child(srv_input)
-	
 	var room_title = Label.new()
-	room_title.text = "🏠 ACTIVE GAME ROOMS (4-PLAYER MATCHES):"
+	room_title.text = "🏠 LOBBY ROOMS:"
 	room_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	room_title.add_theme_font_size_override("font_size", 13)
 	room_title.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
@@ -595,8 +652,8 @@ func _create_lobby_ui():
 	mvbox.add_child(room_actions)
 	
 	var create_btn = Button.new()
-	create_btn.text = "➕ CREATE ROOM"
-	create_btn.custom_minimum_size = Vector2(160, 36)
+	create_btn.text = "➕ CREATE ROOM (HOST)"
+	create_btn.custom_minimum_size = Vector2(200, 36)
 	create_btn.pressed.connect(_on_create_room_pressed)
 	room_actions.add_child(create_btn)
 	
@@ -606,116 +663,334 @@ func _create_lobby_ui():
 	refresh_btn.pressed.connect(_refresh_room_list)
 	room_actions.add_child(refresh_btn)
 	
-	var play_anyway_btn = Button.new()
-	play_anyway_btn.name = "PlayButton"
-	play_anyway_btn.text = "🚀 PLAY (QUICK MATCH)"
-	play_anyway_btn.custom_minimum_size = Vector2(250, 40)
-	play_anyway_btn.pressed.connect(func(): _on_join_pressed())
-	mvbox.add_child(play_anyway_btn)
-	
 	var logout_btn = Button.new()
 	logout_btn.text = "🚪 LOG OUT"
 	logout_btn.custom_minimum_size = Vector2(100, 26)
 	logout_btn.pressed.connect(_on_logout_pressed)
 	mvbox.add_child(logout_btn)
 
+	# ----------------------------------------------------
+	# SCREEN 4: ROOM LOBBY PANEL
+	# ----------------------------------------------------
+	room_panel = Control.new()
+	room_panel.name = "RoomPanel"
+	room_panel.visible = false
+	$UI/Lobby.add_child(room_panel)
+	room_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	
+	var r_box = PanelContainer.new()
+	r_box.name = "PanelContainer"
+	r_box.custom_minimum_size = Vector2(500, 450)
+	room_panel.add_child(r_box)
+	r_box.set_anchors_preset(Control.PRESET_CENTER)
+	r_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	r_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	r_box.add_theme_stylebox_override("panel", box_style)
+	
+	var rvbox = VBoxContainer.new()
+	rvbox.name = "VBoxContainer"
+	rvbox.add_theme_constant_override("separation", 12)
+	rvbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	r_box.add_child(rvbox)
+	
+	var r_title = Label.new()
+	r_title.name = "RoomTitle"
+	r_title.text = "ROOM: room_xxxxxxxx"
+	r_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	r_title.add_theme_font_size_override("font_size", 20)
+	r_title.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
+	rvbox.add_child(r_title)
+	
+	var r_desc = Label.new()
+	r_desc.text = "PLAYERS IN ROOM LOBBY:"
+	r_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	r_desc.add_theme_font_size_override("font_size", 12)
+	r_desc.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	rvbox.add_child(r_desc)
+	
+	# Hero selection inside room waiting lobby
+	var r_hero_hbox = HBoxContainer.new()
+	r_hero_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	r_hero_hbox.add_theme_constant_override("separation", 10)
+	rvbox.add_child(r_hero_hbox)
+	
+	var r_hero_lbl = Label.new()
+	r_hero_lbl.text = "Select Hero:"
+	r_hero_lbl.add_theme_font_size_override("font_size", 13)
+	r_hero_lbl.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0))
+	r_hero_hbox.add_child(r_hero_lbl)
+	
+	var r_hero_select = OptionButton.new()
+	r_hero_select.name = "RoomHeroSelect"
+	r_hero_select.add_item("🏹 Ranger", 0)
+	r_hero_select.add_item("🛡️ Knight", 1)
+	r_hero_select.add_item("🔥 Mage", 2)
+	r_hero_select.add_item("🗡️ Assassin", 3)
+	r_hero_select.add_item("👁️ Sniper", 4)
+	r_hero_select.selected = 0
+	r_hero_select.item_selected.connect(_on_room_hero_selected)
+	r_hero_hbox.add_child(r_hero_select)
+	
+	var r_scroll = ScrollContainer.new()
+	r_scroll.custom_minimum_size = Vector2(400, 150)
+	r_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	r_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	rvbox.add_child(r_scroll)
+	
+	var r_players_box = VBoxContainer.new()
+	r_players_box.name = "PlayersList"
+	r_scroll.add_child(r_players_box)
+	
+	var r_status = Label.new()
+	r_status.name = "StatusLabel"
+	r_status.text = "Waiting for host to start..."
+	r_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	r_status.add_theme_font_size_override("font_size", 13)
+	r_status.add_theme_color_override("font_color", Color(0.9, 0.8, 0.3))
+	rvbox.add_child(r_status)
+	
+	var start_game_btn = Button.new()
+	start_game_btn.name = "StartGameButton"
+	start_game_btn.text = "🚀 START MATCH"
+	start_game_btn.custom_minimum_size = Vector2(200, 40)
+	start_game_btn.visible = false
+	start_game_btn.pressed.connect(_on_start_match_pressed)
+	rvbox.add_child(start_game_btn)
+	
+	var leave_btn = Button.new()
+	leave_btn.text = "🚪 LEAVE ROOM"
+	leave_btn.custom_minimum_size = Vector2(160, 36)
+	leave_btn.pressed.connect(_on_leave_room_pressed)
+	rvbox.add_child(leave_btn)
+
 func _get_http_api_base() -> String:
-	var ws_url = "ws://localhost:8080/ws"
-	var srv_input = menu_panel.find_child("ServerInput") if menu_panel else null
-	if srv_input:
-		ws_url = srv_input.text.strip_edges()
-	elif has_node("UI/Lobby/Panel/VBox/ServerInput"):
-		ws_url = $UI/Lobby/Panel/VBox/ServerInput.text.strip_edges()
+	var protocol = "http://"
+	if OS.has_feature("web"):
+		var web_proto = JavaScriptBridge.eval("window.location.protocol")
+		if web_proto == "https:":
+			protocol = "https://"
+	return protocol + server_host + ":" + server_port
+
+func _send_get(url: String, callback: Callable):
+	var http = HTTPRequest.new()
+	add_child(http)
+	http.request_completed.connect(func(res, code, hdrs, bdy):
+		callback.call(res, code, hdrs, bdy)
+		http.queue_free()
+	)
+	http.request(url, [], HTTPClient.METHOD_GET)
+
+func _send_post(url: String, body: Dictionary, callback: Callable):
+	var http = HTTPRequest.new()
+	add_child(http)
+	http.request_completed.connect(func(res, code, hdrs, bdy):
+		callback.call(res, code, hdrs, bdy)
+		http.queue_free()
+	)
+	var headers = ["Content-Type: application/json"]
+	http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+
+func _on_connect_server_pressed(host: String, port: String):
+	host = host.strip_edges()
+	port = port.strip_edges()
+	if host == "" or port == "":
+		_show_server_error("Host and Port cannot be empty!")
+		return
 		
-	if ws_url == "":
-		ws_url = "ws://localhost:8080/ws"
-		
-	var http_url = ws_url
-	if http_url.begins_with("wss://"):
-		http_url = http_url.replace("wss://", "https://")
-	elif http_url.begins_with("ws://"):
-		http_url = http_url.replace("ws://", "http://")
-		
-	if http_url.ends_with("/ws"):
-		http_url = http_url.substr(0, http_url.length() - 3)
-	elif http_url.ends_with("/"):
-		http_url = http_url.substr(0, http_url.length() - 1)
-		
-	return http_url
+	server_host = host
+	server_port = port
+	
+	# Release focus to close virtual keyboard
+	var host_input = server_panel.find_child("HostInput")
+	var port_input = server_panel.find_child("PortInput")
+	if host_input: host_input.release_focus()
+	if port_input: port_input.release_focus()
+	
+	_show_server_status("Connecting to server...")
+	
+	var url = _get_http_api_base() + "/api/rooms"
+	_send_get(url, func(res, code, hdrs, bdy):
+		if res != HTTPRequest.RESULT_SUCCESS or code != 200:
+			_show_server_error("Cannot connect to server at " + host + ":" + port)
+		else:
+			# Connected! Check if we can auto-login with saved token
+			if auth_token != "" and auth_username != "":
+				_show_server_status("Verifying session...")
+				var profile_url = _get_http_api_base() + "/api/profile?token=" + auth_token.uri_encode()
+				_send_get(profile_url, func(p_res, p_code, p_hdrs, p_bdy):
+					if p_res == HTTPRequest.RESULT_SUCCESS and p_code == 200:
+						var data_str = p_bdy.get_string_from_utf8()
+						var data = JSON.parse_string(data_str)
+						if data is Dictionary and data.get("ok") == true:
+							user_stats = {
+								"kills": int(data.get("total_kills", 0)),
+								"wins": int(data.get("total_wins", 0)),
+								"played": int(data.get("games_played", 0))
+							}
+							var hero = data.get("hero", "ranger")
+							var hero_idx = 0
+							match hero:
+								"knight": hero_idx = 1
+								"mage": hero_idx = 2
+								"assassin": hero_idx = 3
+								"sniper": hero_idx = 4
+							if hero_select_btn:
+								hero_select_btn.selected = hero_idx
+							
+							_save_token(auth_token, auth_username, server_host, server_port)
+							_show_profile_panel()
+							return
+					# Token invalid/failed: show auth screen
+					_show_auth_panel()
+				)
+			else:
+				# No token: show auth screen
+				_show_auth_panel()
+	)
 
 func _on_auth_pressed(user: String, pass_word: String, register: bool):
 	user = user.strip_edges()
 	pass_word = pass_word.strip_edges()
 	
-	var err_label = login_panel.find_child("ErrorLabel")
 	if user == "" or pass_word == "":
-		if err_label: err_label.text = "Username and password cannot be empty!"
+		_show_auth_error("Username and password cannot be empty!")
 		return
 		
-	if err_label: err_label.text = "Connecting to auth backend..."
-	
-	var api_base = _get_http_api_base()
-	var endpoint = "/api/register" if register else "/api/login"
-	var url = api_base + endpoint
-	
-	var headers = ["Content-Type: application/json"]
-	var body = JSON.stringify({
-		"username": user,
-		"password": pass_word
-	})
-	
-	http_node.cancel_request()
-	var err = http_node.request(url, headers, HTTPClient.METHOD_POST, body)
-	if err != OK:
-		if err_label: err_label.text = "Failed to send request: Code " + str(err)
+	# Release focus to close virtual keyboard
+	var user_input = auth_panel.find_child("UsernameInput")
+	var pass_input = auth_panel.find_child("PasswordInput")
+	if user_input: user_input.release_focus()
+	if pass_input: pass_input.release_focus()
+		
+	_show_auth_status("Authenticating...")
+	var url = _get_http_api_base() + ("/api/register" if register else "/api/login")
+	_send_post(url, {"username": user, "password": pass_word}, func(res, code, hdrs, bdy):
+		if res != HTTPRequest.RESULT_SUCCESS:
+			_show_auth_error("Network connection error.")
+			return
+			
+		var body_str = bdy.get_string_from_utf8()
+		var data = JSON.parse_string(body_str)
+		
+		if code != 200:
+			var error_msg = "Error (" + str(code) + ")"
+			if data is Dictionary and data.has("error"):
+				error_msg = data["error"]
+			_show_auth_error(error_msg)
+			return
+			
+		if data is Dictionary and data.get("ok") == true:
+			auth_token = data.get("token", "")
+			auth_username = data.get("username", "")
+			is_guest = false
+			user_stats = {
+				"kills": int(data.get("total_kills", 0)),
+				"wins": int(data.get("total_wins", 0)),
+				"played": int(data.get("games_played", 0))
+			}
+			
+			_save_token(auth_token, auth_username, server_host, server_port)
+			
+			var hero = data.get("hero", "ranger")
+			var hero_idx = 0
+			match hero:
+				"knight": hero_idx = 1
+				"mage": hero_idx = 2
+				"assassin": hero_idx = 3
+				"sniper": hero_idx = 4
+			if hero_select_btn:
+				hero_select_btn.selected = hero_idx
+				
+			_show_profile_panel()
+	)
 
-func _on_guest_pressed():
-	auth_token = ""
-	auth_username = "Guest_" + str(randi() % 1000)
-	is_guest = true
-	user_stats = {"kills": 0, "wins": 0, "played": 0}
-	selected_room_id = ""
-	_show_menu_panel()
-
-func _show_menu_panel():
-	login_panel.visible = false
-	menu_panel.visible = true
+func _show_server_config_panel():
+	server_panel.visible = true
+	auth_panel.visible = false
+	profile_panel.visible = false
+	room_panel.visible = false
 	
-	var profile_lbl = menu_panel.find_child("ProfileLabel")
-	var stats_lbl = menu_panel.find_child("StatsLabel")
+	var err_lbl = server_panel.find_child("ErrorLabel")
+	if err_lbl: err_lbl.text = ""
+
+func _show_auth_panel():
+	server_panel.visible = false
+	auth_panel.visible = true
+	profile_panel.visible = false
+	room_panel.visible = false
+	
+	var err_lbl = auth_panel.find_child("ErrorLabel")
+	if err_lbl: err_lbl.text = ""
+
+func _show_profile_panel():
+	server_panel.visible = false
+	auth_panel.visible = false
+	profile_panel.visible = true
+	room_panel.visible = false
+	
+	var profile_lbl = profile_panel.find_child("ProfileLabel")
+	var stats_lbl = profile_panel.find_child("StatsLabel")
 	
 	if profile_lbl:
-		if is_guest:
-			profile_lbl.text = "👤 Welcome, " + auth_username + " (Guest Mode)"
-		else:
-			profile_lbl.text = "🏆 Welcome, " + auth_username + "!"
+		profile_lbl.text = "🏆 Welcome, " + auth_username + "!"
 			
 	if stats_lbl:
-		if is_guest:
-			stats_lbl.text = "Log in to save kills & wins in the database!"
-		else:
-			stats_lbl.text = "Kills: %d  |  Wins: %d  |  Matches Played: %d" % [user_stats["kills"], user_stats["wins"], user_stats["played"]]
+		stats_lbl.text = "Kills: %d  |  Wins: %d  |  Matches Played: %d" % [user_stats["kills"], user_stats["wins"], user_stats["played"]]
 			
 	_refresh_room_list()
 
-func _refresh_room_list():
-	var api_base = _get_http_api_base()
-	var url = api_base + "/api/rooms"
+func _show_room_panel():
+	server_panel.visible = false
+	auth_panel.visible = false
+	profile_panel.visible = false
+	room_panel.visible = true
 	
-	var list_http = HTTPRequest.new()
-	add_child(list_http)
-	list_http.request_completed.connect(func(res, code, hdrs, bdy):
+	var r_title = room_panel.find_child("RoomTitle")
+	if r_title:
+		r_title.text = "🏠 ROOM: " + selected_room_id
+		
+	var start_btn = room_panel.find_child("StartGameButton")
+	if start_btn: start_btn.visible = false
+	
+	var status_lbl = room_panel.find_child("StatusLabel")
+	if status_lbl: status_lbl.text = "Connecting to room lobby..."
+
+func _show_server_error(txt: String):
+	var err_lbl = server_panel.find_child("ErrorLabel")
+	if err_lbl:
+		err_lbl.text = txt
+		err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+
+func _show_server_status(txt: String):
+	var err_lbl = server_panel.find_child("ErrorLabel")
+	if err_lbl:
+		err_lbl.text = txt
+		err_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
+
+func _show_auth_error(txt: String):
+	var err_lbl = auth_panel.find_child("ErrorLabel")
+	if err_lbl:
+		err_lbl.text = txt
+		err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+
+func _show_auth_status(txt: String):
+	var err_lbl = auth_panel.find_child("ErrorLabel")
+	if err_lbl:
+		err_lbl.text = txt
+		err_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
+
+func _refresh_room_list():
+	var url = _get_http_api_base() + "/api/rooms"
+	_send_get(url, func(res, code, hdrs, bdy):
 		if res == HTTPRequest.RESULT_SUCCESS and code == 200:
 			var data_str = bdy.get_string_from_utf8()
 			var rooms_data = JSON.parse_string(data_str)
 			if rooms_data is Array:
 				_populate_room_list(rooms_data)
-		list_http.queue_free()
 	)
-	list_http.request(url, [], HTTPClient.METHOD_GET)
 
 func _populate_room_list(rooms: Array):
-	var list_box = menu_panel.find_child("RoomList")
+	var list_box = profile_panel.find_child("RoomList")
 	if not list_box: return
 	
 	for child in list_box.get_children():
@@ -754,12 +1029,8 @@ func _populate_room_list(rooms: Array):
 		hbox.add_child(join_btn)
 
 func _on_create_room_pressed():
-	var api_base = _get_http_api_base()
-	var url = api_base + "/api/rooms"
-	
-	var create_http = HTTPRequest.new()
-	add_child(create_http)
-	create_http.request_completed.connect(func(res, code, hdrs, bdy):
+	var url = _get_http_api_base() + "/api/rooms"
+	_send_post(url, {}, func(res, code, hdrs, bdy):
 		if res == HTTPRequest.RESULT_SUCCESS and code == 200:
 			var data_str = bdy.get_string_from_utf8()
 			var data = JSON.parse_string(data_str)
@@ -767,12 +1038,10 @@ func _on_create_room_pressed():
 				var created_id = data.get("room_id", "")
 				selected_room_id = created_id
 				_on_join_pressed()
-		create_http.queue_free()
 	)
-	create_http.request(url, ["Content-Type: application/json"], HTTPClient.METHOD_POST, "{}")
 
 func _on_hero_class_selected(idx: int):
-	if is_guest or auth_token == "": return
+	if auth_token == "": return
 	var hero_name = "ranger"
 	match idx:
 		1: hero_name = "knight"
@@ -780,69 +1049,85 @@ func _on_hero_class_selected(idx: int):
 		3: hero_name = "assassin"
 		4: hero_name = "sniper"
 		
-	var api_base = _get_http_api_base()
-	var url = api_base + "/api/update_hero"
-	var update_http = HTTPRequest.new()
-	add_child(update_http)
-	update_http.request_completed.connect(func(r, c, h, b): update_http.queue_free())
-	update_http.request(
-		url, 
-		["Content-Type: application/json"], 
-		HTTPClient.METHOD_POST, 
-		JSON.stringify({"token": auth_token, "hero": hero_name})
-	)
+	var url = _get_http_api_base() + "/api/update_hero"
+	_send_post(url, {"token": auth_token, "hero": hero_name}, func(r, c, h, b): pass)
+
+func _on_room_hero_selected(idx: int):
+	if hero_select_btn:
+		hero_select_btn.selected = idx
+	_on_hero_class_selected(idx)
+	if is_connected:
+		var hero_name = "ranger"
+		match idx:
+			1: hero_name = "knight"
+			2: hero_name = "mage"
+			3: hero_name = "assassin"
+			4: hero_name = "sniper"
+		var msg = {
+			"type": "update_hero",
+			"hero": hero_name
+		}
+		socket.send_text(JSON.stringify(msg))
 
 func _on_logout_pressed():
 	auth_token = ""
 	auth_username = ""
-	is_guest = true
+	is_guest = false
 	# Delete token file
 	DirAccess.remove_absolute("user://auth_token.txt")
-	
-	menu_panel.visible = false
-	login_panel.visible = true
-	var err_lbl = login_panel.find_child("ErrorLabel")
-	if err_lbl: err_lbl.text = ""
+	_show_server_config_panel()
 
-func _on_http_request_completed(result, response_code, headers, body):
-	var err_label = login_panel.find_child("ErrorLabel")
-	if result != HTTPRequest.RESULT_SUCCESS:
-		if err_label: err_label.text = "Connection to auth server failed."
-		return
-		
-	var body_str = body.get_string_from_utf8()
-	var data = JSON.parse_string(body_str)
+func _update_room_lobby_list(room_players: Array, host_id: String):
+	if not room_panel: return
+	var r_players_box = room_panel.find_child("PlayersList")
+	if not r_players_box: return
 	
-	if response_code != 200:
-		var error_msg = "Error (" + str(response_code) + ")"
-		if data is Dictionary and data.has("error"):
-			error_msg = data["error"]
-		if err_label: err_label.text = error_msg
-		return
+	for child in r_players_box.get_children():
+		child.queue_free()
 		
-	if data is Dictionary and data.get("ok") == true:
-		auth_token = data.get("token", "")
-		auth_username = data.get("username", "")
-		is_guest = false
-		user_stats = {
-			"kills": int(data.get("total_kills", 0)),
-			"wins": int(data.get("total_wins", 0)),
-			"played": int(data.get("games_played", 0))
-		}
+	var is_me_host = false
+	for p in room_players:
+		if not (p is Dictionary): continue
+		var p_id = p.get("id", "")
+		var p_name = p.get("name", "")
+		var p_hero = p.get("hero", "ranger")
+		var p_is_host = p.get("is_host", false)
 		
-		_save_token(auth_token, auth_username)
-		
-		var hero = data.get("hero", "ranger")
-		var hero_idx = 0
-		match hero:
-			"knight": hero_idx = 1
-			"mage": hero_idx = 2
-			"assassin": hero_idx = 3
-			"sniper": hero_idx = 4
-		if hero_select_btn:
-			hero_select_btn.selected = hero_idx
+		if p_id == client_id and p_is_host:
+			is_me_host = true
 			
-		_show_menu_panel()
+		var hbox = HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 15)
+		r_players_box.add_child(hbox)
+		
+		var name_lbl = Label.new()
+		var host_tag = "👑 [HOST] " if p_is_host else ""
+		name_lbl.text = host_tag + p_name + " (" + p_hero.to_upper() + ")"
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if p_id == client_id:
+			name_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5)) # Highlight current player
+		hbox.add_child(name_lbl)
+		
+	var start_btn = room_panel.find_child("StartGameButton")
+	var status_lbl = room_panel.find_child("StatusLabel")
+	
+	if is_me_host:
+		if start_btn: start_btn.visible = true
+		if status_lbl: status_lbl.text = "You are the Room Host! Select your class and click Start Match when ready."
+	else:
+		if start_btn: start_btn.visible = false
+		if status_lbl: status_lbl.text = "Waiting for Room Host to start the match..."
+
+func _on_start_match_pressed():
+	if is_connected:
+		socket.send_text(JSON.stringify({"type": "start_game"}))
+
+func _on_leave_room_pressed():
+	socket.close()
+	is_connected = false
+	is_connecting = false
+	selected_room_id = ""
+	_show_profile_panel()
 
 func _on_join_pressed():
 	if is_connecting or is_connected:
@@ -852,51 +1137,28 @@ func _on_join_pressed():
 	if nickname == "":
 		nickname = "Guest_" + str(randi() % 1000)
 			
-	var server_url = "ws://localhost:8080/ws"
-	var srv_input = menu_panel.find_child("ServerInput") if menu_panel else null
-	if srv_input and srv_input.text.strip_edges() != "":
-		var final_url = srv_input.text.strip_edges()
-		if not (final_url.begins_with("ws://") or final_url.begins_with("wss://")):
-			final_url = "ws://" + final_url
-		if not final_url.to_lower().ends_with("/ws"):
-			if final_url.ends_with("/"):
-				final_url += "ws"
-			else:
-				final_url += "/ws"
-		server_url = final_url
-	else:
-		server_url = "wss://prts.kyoiryi.top/archer/ws"
-		
-	var selected_hero_idx = hero_select_btn.selected
-	var ws_url = server_url + "?name=" + nickname.uri_encode() + "&hero=" + str(selected_hero_idx)
+	var ws_protocol = "ws://"
+	if OS.has_feature("web"):
+		var protocol = JavaScriptBridge.eval("window.location.protocol")
+		if str(protocol) == "https:":
+			ws_protocol = "wss://"
+			
+	var ws_url = ws_protocol + server_host + ":" + server_port + "/ws?name=" + nickname.uri_encode() + "&hero=" + str(hero_select_btn.selected)
 	if auth_token != "":
 		ws_url += "&token=" + auth_token.uri_encode()
 	if selected_room_id != "":
 		ws_url += "&room_id=" + selected_room_id.uri_encode()
 	
-	add_chat_message("System", "Connecting to " + ws_url + "...")
-	if status_label:
-		status_label.text = "Connecting..."
-		status_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	add_chat_message("System", "Connecting to room lobby: " + selected_room_id + "...")
+	_show_room_panel()
 	
 	is_connecting = true
 	connection_timeout_timer = 5.0
-	
-	var play_btn = menu_panel.find_child("PlayButton") if menu_panel else null
-	if play_btn:
-		play_btn.disabled = true
-		play_btn.text = "CONNECTING..."
-	
 	socket.connect_to_url(ws_url)
 
 func _reset_join_button_state():
-	if has_node("UI/Lobby/Panel/VBox/JoinButton"):
-		$UI/Lobby/Panel/VBox/JoinButton.disabled = false
-		$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
-	var play_btn = menu_panel.find_child("PlayButton") if menu_panel else null
-	if play_btn:
-		play_btn.disabled = false
-		play_btn.text = "🚀 PLAY (QUICK MATCH)"
+	# If connection fails, return back to profile panel
+	_show_profile_panel()
 
 
 func _process(delta):
@@ -908,10 +1170,11 @@ func _process(delta):
 		if not is_connected:
 			is_connected = true
 			is_connecting = false
-			_reset_join_button_state()
-			$UI/Lobby.visible = false
-			$UI/HUD.visible = true
-			add_chat_message("System", "Successfully connected!")
+			# Update hero select inside the Room Lobby to match profile hero select
+			var r_hero_select = room_panel.find_child("RoomHeroSelect")
+			if r_hero_select and hero_select_btn:
+				r_hero_select.selected = hero_select_btn.selected
+			add_chat_message("System", "Successfully connected to Room Lobby!")
 			if status_label:
 				status_label.text = ""
 		
@@ -1166,7 +1429,25 @@ func _handle_server_message(data: Dictionary):
 			portals = _get_safe_array(data, "portals")
 			heal_zones = _get_safe_array(data, "heal_zones")
 			trap_zones = _get_safe_array(data, "trap_zones")
-			add_chat_message("System", "Joined match! You are Team: " + my_team.to_upper())
+			add_chat_message("System", "Joined room. Waiting in lobby...")
+			
+		"room_update":
+			var r_players = _get_safe_array(data, "room_players")
+			var host_id = _get_safe_string(data, "host_id", "")
+			var r_state = _get_safe_string(data, "room_state", "lobby")
+			_update_room_lobby_list(r_players, host_id)
+			if r_state == "playing" and $UI/Lobby.visible:
+				# Match is in progress, transition to HUD!
+				$UI/Lobby.visible = false
+				$UI/HUD.visible = true
+				add_chat_message("System", "Joined match in progress!")
+				
+		"start_game":
+			$UI/Lobby.visible = false
+			$UI/HUD.visible = true
+			$UI/SkillPanel.visible = false
+			$UI/GameOver.visible = false
+			add_chat_message("System", "Match started by host! Fight!")
 			
 		"state":
 			var old_minion_hps = _get_entities_hps(_get_safe_array(game_state, "minions"))
@@ -1283,9 +1564,12 @@ func _handle_server_message(data: Dictionary):
 			$UI/GameOver/Panel/VBox/Subtitle.text = winner.to_upper() + " Team destroyed the opponent's core base!"
 			$UI/GameOver.visible = true
 			
-			# Auto hide victory panel after 8 seconds
+			# Auto hide victory panel after 8 seconds and return to lobby waiting screen
 			get_tree().create_timer(8.0).timeout.connect(func():
 				$UI/GameOver.visible = false
+				$UI/Lobby.visible = true
+				$UI/HUD.visible = false
+				_show_room_panel()
 			)
 
 func _get_entities_hps(list: Array) -> Dictionary:

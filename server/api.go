@@ -149,19 +149,7 @@ func handleRegisterAccount(w http.ResponseWriter, r *http.Request) {
 // POST /api/login
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if DB == nil {
-		// Offline mode: return a guest token
-		var req LoginRequest
-		json.NewDecoder(r.Body).Decode(&req)
-		name := strings.TrimSpace(req.Username)
-		if name == "" {
-			name = "Guest"
-		}
-		token := generateToken()
-		tokenStore.tokens[token] = -1 // guest
-		tokenStore.usernames[token] = name
-		jsonResponse(w, 200, AuthResponse{
-			OK: true, Token: token, AccountID: -1, Username: name, Hero: "ranger",
-		})
+		jsonResponse(w, 503, AuthResponse{Error: "Database not available. Registration is mandatory."})
 		return
 	}
 

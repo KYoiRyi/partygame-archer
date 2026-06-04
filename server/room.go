@@ -37,6 +37,9 @@ type Room struct {
 	spawnTimer  float64
 	gemTimer    float64
 	entityIDSeq int64
+
+	State       string
+	HostID      string
 }
 
 type playerInput struct {
@@ -57,6 +60,7 @@ func NewRoom(id string) *Room {
 		inputChan:   make(chan playerInput, 100),
 		stopChan:    make(chan struct{}),
 		GlobalEventTimeUntilNext: 60.0,
+		State:       "lobby",
 	}
 	
 	r.initMap()
@@ -64,36 +68,20 @@ func NewRoom(id string) *Room {
 }
 
 func (r *Room) initMap() {
-	// 1. Setup Walls/Obstacles
-	// Middle wall barriers
+	// Setup static Walls/Obstacles
 	r.Walls = []Wall{
-		// Central blockades
 		{X: 1450, Y: 200, Width: 100, Height: 300},
 		{X: 1450, Y: 700, Width: 100, Height: 300},
-		// Left side blockades (protecting blue territory)
 		{X: 800, Y: 150, Width: 80, Height: 250},
 		{X: 800, Y: 800, Width: 80, Height: 250},
-		// Right side blockades (protecting red territory)
 		{X: 2120, Y: 150, Width: 80, Height: 250},
 		{X: 2120, Y: 800, Width: 80, Height: 250},
-		// Small cover blocks
 		{X: 1100, Y: 550, Width: 120, Height: 100},
 		{X: 1780, Y: 550, Width: 120, Height: 100},
-		// Additional map features
 		{X: 400, Y: 400, Width: 80, Height: 80},
 		{X: 400, Y: 800, Width: 80, Height: 80},
 		{X: 2520, Y: 400, Width: 80, Height: 80},
 		{X: 2520, Y: 800, Width: 80, Height: 80},
-	}
-
-	// No towers in FFA Mode
-	
-	// Initial XP Gems
-	for i := 0; i < 25; i++ {
-		r.spawnGem("xp")
-	}
-	for i := 0; i < 5; i++ {
-		r.spawnGem("hp")
 	}
 
 	r.Portals = []Portal{
@@ -111,12 +99,74 @@ func (r *Room) initMap() {
 		{ID: "t1", Position: Vector2{X: 1500, Y: 200}, Radius: 120, DamageRate: 15.0},
 		{ID: "t2", Position: Vector2{X: 1500, Y: 1000}, Radius: 120, DamageRate: 15.0},
 	}
+}
 
+func (r *Room) startMatch() {
+	r.State = "playing"
+	log.Printf("Room %s: starting match!", r.ID)
+
+	r.Projectiles = make(map[string]*Projectile)
+	r.Gems = make(map[string]*Gem)
+	r.Crates = make(map[string]*Crate)
+
+	// Spawn XP/HP Gems
+	for i := 0; i < 25; i++ {
+		r.spawnGem("xp")
+	}
+	for i := 0; i < 5; i++ {
+		r.spawnGem("hp")
+	}
+	// Spawn crates
 	for i := 0; i < 8; i++ {
 		r.spawnCrate()
 	}
-
+	// Spawn bots
 	r.fillRoomWithBots()
+
+	// Notify all clients to start the game
+	msg := ServerMessage{
+		Type:      "start_game",
+		RoomState: r.State,
+	}
+	if data, err := json.Marshal(msg); err == nil {
+		r.broadcast(data)
+	}
+
+	// Respawn all human players
+	for _, p := range r.Players {
+		if !p.IsBot {
+			p.Skills = make(map[string]int)
+			initPlayerStats(p, p.Hero)
+			r.respawnPlayer(p)
+		}
+	}
+
+	r.broadcastChat("system", "The host has started the match! Fight!")
+}
+
+func (r *Room) broadcastRoomUpdate() {
+	playersInfo := []RoomPlayerInfo{}
+	for _, p := range r.Players {
+		if p.IsBot {
+			continue
+		}
+		playersInfo = append(playersInfo, RoomPlayerInfo{
+			ID:     p.ID,
+			Name:   p.Name,
+			Hero:   p.Hero,
+			IsHost: p.ID == r.HostID,
+		})
+	}
+
+	msg := ServerMessage{
+		Type:        "room_update",
+		RoomPlayers: playersInfo,
+		RoomState:   r.State,
+		HostID:      r.HostID,
+	}
+	if data, err := json.Marshal(msg); err == nil {
+		r.broadcast(data)
+	}
 }
 
 func (r *Room) Start() {
@@ -227,29 +277,23 @@ func (r *Room) handleRegister(p *Player) {
 	// Free-For-All: Everyone is their own team
 	p.Team = p.ID
 
-	// Kick an AI bot to free up a slot for the human player, keep max 10 players total
-	var botToKick *Player
-	for len(r.Players) >= 10 {
-		for _, pl := range r.Players {
-			if pl.IsBot {
-				botToKick = pl
-				break
-			}
-		}
-		if botToKick != nil {
-			delete(r.Players, botToKick.ID)
-			botToKick = nil
-		} else {
-			break
-		}
+	// Set host if room has no host
+	if r.HostID == "" {
+		r.HostID = p.ID
 	}
-	
+
 	initPlayerStats(p, p.Hero)
-	r.respawnPlayer(p)
+	if r.State == "playing" {
+		// If joined late during a match, respawn directly into active game
+		r.respawnPlayer(p)
+	} else {
+		// Just wait in lobby
+		p.Position = Vector2{X: 0, Y: 0}
+	}
 	
 	r.Players[p.ID] = p
 
-	// Send init message
+	// Send static obstacles/map info
 	initMsg := ServerMessage{
 		Type:       "init",
 		ClientID:   p.ID,
@@ -263,12 +307,12 @@ func (r *Room) handleRegister(p *Player) {
 		select {
 		case p.send <- data:
 		default:
-			log.Printf("Warning: failed to send init msg to player %s, channel full/closed", p.ID)
+			log.Printf("Warning: failed to send init msg to player %s", p.ID)
 		}
 	}
 
-	// Chat broadcast join
-	r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the arena!", p.Name, p.Hero))
+	r.broadcastRoomUpdate()
+	r.broadcastChat("system", fmt.Sprintf("%s (%s) joined the room!", p.Name, p.Hero))
 }
 
 func (r *Room) handleUnregister(p *Player) {
@@ -277,10 +321,25 @@ func (r *Room) handleUnregister(p *Player) {
 
 	if _, ok := r.Players[p.ID]; ok {
 		delete(r.Players, p.ID)
-		r.broadcastChat("system", fmt.Sprintf("%s has left the game.", p.Name))
 		
-		// Fill room with bots to keep the match busy
-		r.fillRoomWithBots()
+		// If the leaving player was host, assign host role to next human
+		if r.HostID == p.ID {
+			r.HostID = ""
+			for _, pl := range r.Players {
+				if !pl.IsBot {
+					r.HostID = pl.ID
+					break
+				}
+			}
+		}
+
+		r.broadcastRoomUpdate()
+		r.broadcastChat("system", fmt.Sprintf("%s has left the room.", p.Name))
+		
+		// Fill room with bots to keep the match busy (only if match is currently playing)
+		if r.State == "playing" {
+			r.fillRoomWithBots()
+		}
 	}
 }
 
@@ -289,7 +348,21 @@ func (r *Room) handlePlayerInput(playerID string, msg ClientMessage) {
 	defer r.mu.Unlock()
 
 	p, ok := r.Players[playerID]
-	if !ok || p.Dead {
+	if !ok {
+		return
+	}
+
+	if r.State == "lobby" {
+		// If in lobby, only allow "start_game" command from host or chat messages
+		if msg.Type == "start_game" && playerID == r.HostID {
+			r.startMatch()
+		} else if msg.Type == "chat" {
+			r.broadcastChat(p.Name, msg.ChatMsg)
+		}
+		return
+	}
+
+	if p.Dead {
 		return
 	}
 
@@ -309,6 +382,9 @@ func (r *Room) handlePlayerInput(playerID string, msg ClientMessage) {
 		r.playerSelectSkill(p, msg.Skill)
 	case "chat":
 		r.broadcastChat(p.Name, msg.ChatMsg)
+	case "update_hero":
+		p.Hero = msg.Hero
+		r.broadcastRoomUpdate()
 	}
 }
 
@@ -511,6 +587,9 @@ func (r *Room) playerSelectSkill(p *Player, skill string) {
 
 // 30Hz Game Tick logic
 func (r *Room) tick(dt float64) {
+	if r.State == "lobby" {
+		return
+	}
 	r.spawnTimer += dt
 	r.gemTimer += dt
 	
@@ -1113,10 +1192,10 @@ func (r *Room) endGame(winner string) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		
+		r.State = "lobby"
 		r.Projectiles = make(map[string]*Projectile)
 		r.Gems = make(map[string]*Gem)
-		
-		r.initMap()
+		r.Crates = make(map[string]*Crate)
 		
 		for _, p := range r.Players {
 			p.Skills = make(map[string]int)
@@ -1128,9 +1207,12 @@ func (r *Room) endGame(winner string) {
 			p.Speed = 280.0
 			p.Score = 0
 			p.Kills = 0
-			r.respawnPlayer(p)
+			p.Dead = false
+			p.Position = Vector2{X: 0, Y: 0}
 		}
-		r.broadcastChat("system", "A new match has started! Go fight!")
+		
+		r.broadcastRoomUpdate()
+		r.broadcastChat("system", "Returning to lobby. Host can start a new match!")
 	}()
 }
 

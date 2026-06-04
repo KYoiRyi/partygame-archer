@@ -130,7 +130,7 @@ const (
 
 // Network Message Structures
 type ClientMessage struct {
-	Type     string  `json:"type"` // "join", "move", "shoot", "select_skill", "chat"
+	Type     string  `json:"type"` // "join", "move", "shoot", "select_skill", "chat", "update_hero"
 	Name     string  `json:"name,omitempty"`
 	X        float64 `json:"x,omitempty"`
 	Y        float64 `json:"y,omitempty"`
@@ -138,6 +138,7 @@ type ClientMessage struct {
 	Skill    string  `json:"skill,omitempty"`
 	ChatMsg  string  `json:"chat_msg,omitempty"`
 	IsMoving bool    `json:"is_moving,omitempty"`
+	Hero     string  `json:"hero,omitempty"`
 }
 
 type GameStateMessage struct {
@@ -146,6 +147,13 @@ type GameStateMessage struct {
 	Gems        []*Gem        `json:"gems"`
 	Crates      []*Crate      `json:"crates"`
 	GlobalEvent string        `json:"global_event,omitempty"`
+}
+
+type RoomPlayerInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Hero   string `json:"hero"`
+	IsHost bool   `json:"is_host"`
 }
 
 type ServerMessage struct {
@@ -166,4 +174,7 @@ type ServerMessage struct {
 	EffectType    string            `json:"effect_type,omitempty"`
 	EffectX       float64           `json:"effect_x,omitempty"`
 	EffectY       float64           `json:"effect_y,omitempty"`
+	RoomPlayers   []RoomPlayerInfo  `json:"room_players,omitempty"`
+	RoomState     string            `json:"room_state,omitempty"`
+	HostID        string            `json:"host_id,omitempty"`
 }
