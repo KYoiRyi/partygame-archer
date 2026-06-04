@@ -132,14 +132,18 @@ func _ready():
 	$UI/HUD.add_child(joystick_draw_node)
 	joystick_draw_node.draw.connect(_on_joystick_draw)
 	
-	# Generate some decorative grass/stealth bushes
-	randomize()
-	for i in range(40):
+	# Generate fixed symmetric grass/stealth bushes for a clear, readable map
+	var fixed_bushes = [
+		Vector2(500, 300), Vector2(500, 900),       # Left side top/bottom
+		Vector2(2500, 300), Vector2(2500, 900),     # Right side top/bottom
+		Vector2(1000, 600), Vector2(2000, 600),     # Mid left/right
+		Vector2(1500, 150), Vector2(1500, 1050)     # Center top/bottom
+	]
+	for pos in fixed_bushes:
 		grass_bushes.append({
-			"pos": Vector2(randf_range(100, 2900), randf_range(100, 1100)),
-			"radius": randf_range(70, 110)
+			"pos": pos,
+			"radius": 120.0
 		})
-		
 	# Dash Button for Mobile & UI
 	var dash_btn = Button.new()
 	dash_btn.name = "DashButton"

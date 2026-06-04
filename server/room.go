@@ -316,12 +316,21 @@ func (r *Room) spawnCrate() {
 	id := fmt.Sprintf("crate_%d", r.entityIDSeq)
 	r.entityIDSeq++
 	
-	x := 100 + rand.Float64()*(MapWidth-200)
-	y := 100 + rand.Float64()*(MapHeight-200)
+	// Predefined symmetric crate positions for a clean layout
+	predefinedPositions := []Vector2{
+		{X: 300, Y: 300}, {X: 300, Y: 900},
+		{X: 2700, Y: 300}, {X: 2700, Y: 900},
+		{X: 1000, Y: 300}, {X: 2000, Y: 300},
+		{X: 1000, Y: 900}, {X: 2000, Y: 900},
+		{X: 1500, Y: 400}, {X: 1500, Y: 800},
+	}
+	
+	// Pick a random predefined position
+	pos := predefinedPositions[rand.Intn(len(predefinedPositions))]
 	
 	r.Crates[id] = &Crate{
 		ID: id,
-		Position: Vector2{X: x, Y: y},
+		Position: pos,
 		HP: 3,
 		Radius: 40.0,
 	}
