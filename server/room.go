@@ -315,6 +315,9 @@ func (r *Room) playerShoot(p *Player, baseAngle float64) {
 		baseCooldown = 0.25
 	}
 	p.ShootCooldown = baseCooldown * math.Pow(0.85, atkSpeedLvl) // 15% CDR per level
+	if p.IsBot {
+		p.ShootCooldown += 1.0 + rand.Float64()*0.5 // Bots shoot much slower, +1~1.5s delay
+	}
 
 	projectileSpeed := 600.0
 	life := 1.2 // seconds

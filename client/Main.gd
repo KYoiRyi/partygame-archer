@@ -197,6 +197,8 @@ func _input(event: InputEvent):
 		last_touch_time = Time.get_ticks_msec()
 		
 	if event is InputEventMouseButton:
+		if $UI/SkillPanel.visible:
+			return # Don't aim while picking skills
 		if Time.get_ticks_msec() - last_touch_time < 100:
 			return # Ignore emulated mouse click from touch
 		if event.button_index == MOUSE_BUTTON_LEFT and not is_chatting:
@@ -219,6 +221,9 @@ func _input(event: InputEvent):
 			if joystick_draw_node: joystick_draw_node.queue_redraw()
 
 	if event is InputEventScreenTouch:
+		if $UI/SkillPanel.visible:
+			return # Don't move or aim while picking skills
+			
 		if event.pressed:
 			# Touch pressed
 			if event.position.x < get_viewport_rect().size.x / 2.0:
@@ -232,6 +237,10 @@ func _input(event: InputEvent):
 						joystick_draw_node.queue_redraw()
 			else:
 				# Right half: Floating Aim & Manual Shoot
+				var dash_btn = $UI/HUD.get_node_or_null("DashButton")
+				if dash_btn and dash_btn.get_global_rect().has_point(event.position):
+					return # Let the button handle it
+					
 				if not aim_active:
 					aim_active = true
 					aim_center = event.position
