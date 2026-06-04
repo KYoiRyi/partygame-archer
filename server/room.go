@@ -16,6 +16,9 @@ type Room struct {
 	Projectiles map[string]*Projectile
 	Gems        map[string]*Gem
 	Walls       []Wall
+	Portals     []Portal
+	HealZones   []HealZone
+	TrapZones   []TrapZone
 	
 	mu          sync.RWMutex
 	register    chan *Player
@@ -69,6 +72,11 @@ func (r *Room) initMap() {
 		// Small cover blocks
 		{X: 1100, Y: 550, Width: 120, Height: 100},
 		{X: 1780, Y: 550, Width: 120, Height: 100},
+		// Additional map features
+		{X: 400, Y: 400, Width: 80, Height: 80},
+		{X: 400, Y: 800, Width: 80, Height: 80},
+		{X: 2520, Y: 400, Width: 80, Height: 80},
+		{X: 2520, Y: 800, Width: 80, Height: 80},
 	}
 
 	// No towers in FFA Mode
@@ -79,6 +87,22 @@ func (r *Room) initMap() {
 	}
 	for i := 0; i < 5; i++ {
 		r.spawnGem("hp")
+	}
+
+	r.Portals = []Portal{
+		{ID: "p1", Position: Vector2{X: 150, Y: 150}, TargetPos: Vector2{X: 2850, Y: 1050}, Radius: 45},
+		{ID: "p2", Position: Vector2{X: 2850, Y: 1050}, TargetPos: Vector2{X: 150, Y: 150}, Radius: 45},
+		{ID: "p3", Position: Vector2{X: 150, Y: 1050}, TargetPos: Vector2{X: 2850, Y: 150}, Radius: 45},
+		{ID: "p4", Position: Vector2{X: 2850, Y: 150}, TargetPos: Vector2{X: 150, Y: 1050}, Radius: 45},
+	}
+
+	r.HealZones = []HealZone{
+		{ID: "h1", Position: Vector2{X: 1500, Y: 600}, Radius: 140, HealRate: 20.0},
+	}
+
+	r.TrapZones = []TrapZone{
+		{ID: "t1", Position: Vector2{X: 1500, Y: 200}, Radius: 120, DamageRate: 15.0},
+		{ID: "t2", Position: Vector2{X: 1500, Y: 1000}, Radius: 120, DamageRate: 15.0},
 	}
 
 	r.fillRoomWithBots()
@@ -160,6 +184,18 @@ func initPlayerStats(p *Player, hero string) {
 		p.HP = 90.0
 		p.Speed = 260.0
 		p.Skills[SkillFireArrow] = 1
+	case "assassin":
+		p.MaxHP = 80.0
+		p.HP = 80.0
+		p.Speed = 330.0
+		p.Skills[SkillPoisonArrow] = 1
+		p.Skills[SkillSpeedBoost] = 1
+	case "sniper":
+		p.MaxHP = 90.0
+		p.HP = 90.0
+		p.Speed = 260.0
+		p.Skills[SkillPiercing] = 1
+		p.Skills[SkillDamageBoost] = 1
 	case "ranger":
 		fallthrough
 	default:
@@ -204,10 +240,13 @@ func (r *Room) handleRegister(p *Player) {
 
 	// Send init message
 	initMsg := ServerMessage{
-		Type:     "init",
-		ClientID: p.ID,
-		Team:     p.Team,
-		Walls:    r.Walls,
+		Type:       "init",
+		ClientID:   p.ID,
+		Team:       p.Team,
+		Walls:      r.Walls,
+		Portals:    r.Portals,
+		HealZones:  r.HealZones,
+		TrapZones:  r.TrapZones,
 	}
 	if data, err := json.Marshal(initMsg); err == nil {
 		select {
@@ -265,6 +304,7 @@ func (r *Room) handlePlayerInput(playerID string, msg ClientMessage) {
 func (r *Room) respawnPlayer(p *Player) {
 	p.Dead = false
 	p.HP = p.MaxHP
+	p.InvincibleTimer = 3.0 // Invincibility after respawn
 	p.Position = Vector2{
 		X: 100 + rand.Float64()*(MapWidth-200),
 		Y: 100 + rand.Float64()*(MapHeight-200),
@@ -311,6 +351,10 @@ func (r *Room) playerShoot(p *Player, baseAngle float64) {
 		baseCooldown = 0.40
 	case "mage":
 		baseCooldown = 0.35
+	case "assassin":
+		baseCooldown = 0.20
+	case "sniper":
+		baseCooldown = 0.60
 	case "ranger":
 		baseCooldown = 0.25
 	}
@@ -470,6 +514,9 @@ func (r *Room) tick(dt float64) {
 		if p.DashCooldown > 0 {
 			p.DashCooldown -= dt
 		}
+		if p.TeleportCooldown > 0 {
+			p.TeleportCooldown -= dt
+		}
 		
 		speedMultiplier := 1.0
 		if p.IceTimer > 0 {
@@ -521,6 +568,41 @@ func (r *Room) tick(dt float64) {
 			if nearestEnemy != nil {
 				angle := math.Atan2(nearestEnemy.Y - p.Position.Y, nearestEnemy.X - p.Position.X)
 				r.playerShoot(p, angle)
+			}
+		}
+
+		// Map Zones interactions
+		for _, hz := range r.HealZones {
+			dx := p.Position.X - hz.Position.X
+			dy := p.Position.Y - hz.Position.Y
+			if math.Sqrt(dx*dx+dy*dy) < hz.Radius {
+				if p.HP < p.MaxHP {
+					p.HP += hz.HealRate * dt
+					if p.HP > p.MaxHP {
+						p.HP = p.MaxHP
+					}
+				}
+			}
+		}
+
+		for _, tz := range r.TrapZones {
+			dx := p.Position.X - tz.Position.X
+			dy := p.Position.Y - tz.Position.Y
+			if math.Sqrt(dx*dx+dy*dy) < tz.Radius {
+				r.damagePlayer(p, tz.DamageRate*dt, "")
+				p.IceTimer = 0.5 // Slow effect from trap
+			}
+		}
+
+		for _, portal := range r.Portals {
+			dx := p.Position.X - portal.Position.X
+			dy := p.Position.Y - portal.Position.Y
+			if math.Sqrt(dx*dx+dy*dy) < portal.Radius {
+				if p.TeleportCooldown <= 0 {
+					p.Position = portal.TargetPos
+					p.TeleportCooldown = 3.0 // 3 seconds cooldown
+					r.broadcastEffect("teleport", p.Position.X, p.Position.Y)
+				}
 			}
 		}
 	}
@@ -1002,7 +1084,7 @@ func (r *Room) spawnBot(team string) {
 		IsBot: true,
 	}
 	
-	heroes := []string{"ranger", "knight", "mage"}
+	heroes := []string{"ranger", "knight", "mage", "assassin", "sniper"}
 	randomHero := heroes[rand.Intn(len(heroes))]
 	initPlayerStats(p, randomHero)
 	

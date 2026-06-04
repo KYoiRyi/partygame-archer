@@ -17,6 +17,9 @@ var game_state: Dictionary = {
 	"gems": []
 }
 var walls: Array = []
+var portals: Array = []
+var heal_zones: Array = []
+var trap_zones: Array = []
 var my_player_data = null
 
 # --- Visual Effects & Juice ---
@@ -100,6 +103,8 @@ func _ready():
 	hero_select_btn.add_item("🏹 Ranger (Multi Shot Lvl 1, Speed 300)", 0)
 	hero_select_btn.add_item("🛡️ Knight (HP Boost Lvl 1, HP 150)", 1)
 	hero_select_btn.add_item("🔥 Mage (Fire Arrow Lvl 1, Speed 260)", 2)
+	hero_select_btn.add_item("🗡️ Assassin (Poison Arrow, Speed 330)", 3)
+	hero_select_btn.add_item("👁️ Sniper (Piercing, Damage Boost, Slow Atk)", 4)
 	hero_select_btn.selected = 0
 	$UI/Lobby/Panel/VBox.add_child(hero_select_btn)
 	$UI/Lobby/Panel/VBox.move_child(hero_select_btn, $UI/Lobby/Panel/VBox.get_child_count() - 2)
@@ -129,10 +134,10 @@ func _ready():
 	
 	# Generate some decorative grass/stealth bushes
 	randomize()
-	for i in range(20):
+	for i in range(40):
 		grass_bushes.append({
-			"pos": Vector2(randf_range(200, 2800), randf_range(100, 1100)),
-			"radius": randf_range(60, 95)
+			"pos": Vector2(randf_range(100, 2900), randf_range(100, 1100)),
+			"radius": randf_range(70, 110)
 		})
 		
 	# Dash Button for Mobile & UI
@@ -158,22 +163,28 @@ func _ready():
 	# Initial window setup
 	get_viewport().files_dropped.connect(func(files): pass)
 	
-	# Add Glow Effects for Ion visuals
+	# Add Glow Effects for Ion visuals (Optimized for Mobile/APK)
 	var env = Environment.new()
 	env.background_mode = Environment.BG_CANVAS
-	env.glow_enabled = true
-	env.set("glow_levels/1", 1.0)
-	env.set("glow_levels/2", 1.0)
-	env.set("glow_levels/3", 1.0)
-	env.set("glow_levels/4", 0.5)
-	env.set("glow_levels/5", 0.5)
-	env.glow_intensity = 1.5
-	env.glow_strength = 1.2
-	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
-	env.glow_hdr_threshold = 0.5
+	if OS.has_feature("mobile") or OS.has_feature("web"):
+		env.glow_enabled = false
+	else:
+		env.glow_enabled = true
+		env.glow_intensity = 0.6
+		env.glow_strength = 0.8
+		env.set("glow_levels/1", 0.0)
+		env.set("glow_levels/2", 0.0)
+		env.set("glow_levels/3", 1.0)
+		env.set("glow_levels/4", 0.0)
+		env.set("glow_levels/5", 0.0)
+		env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+		env.glow_hdr_threshold = 0.8
 	var we = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	
+	# Force 60 FPS to fix stuttering
+	Engine.max_fps = 60
 
 func _on_dash_pressed():
 	if client_dash_cooldown <= 0 and is_connected and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
@@ -587,6 +598,10 @@ func _apply_shoot_cooldown():
 		base_cd = 0.40
 	elif hero == "mage":
 		base_cd = 0.35
+	elif hero == "assassin":
+		base_cd = 0.20
+	elif hero == "sniper":
+		base_cd = 0.60
 	
 	var atk_speed_lvl = 0
 	if my_player_data is Dictionary:
@@ -675,6 +690,9 @@ func _handle_server_message(data: Dictionary):
 			client_id = _get_safe_string(data, "client_id", "")
 			my_team = _get_safe_string(data, "team", "")
 			walls = _get_safe_array(data, "walls")
+			portals = _get_safe_array(data, "portals")
+			heal_zones = _get_safe_array(data, "heal_zones")
+			trap_zones = _get_safe_array(data, "trap_zones")
 			add_chat_message("System", "Joined match! You are Team: " + my_team.to_upper())
 			
 		"state":
@@ -772,6 +790,19 @@ func _handle_server_message(data: Dictionary):
 							"life": randf_range(0.3, 0.8),
 							"size": randf_range(4.0, 10.0)
 						})
+			elif eff_type == "teleport":
+				var e_pos = Vector2(_get_safe_float(data, "effect_x", 0.0), _get_safe_float(data, "effect_y", 0.0))
+				if hit_sparks.size() < 120:
+					for i in range(15):
+						var speed = randf_range(50, 150)
+						var angle = randf_range(0, TAU)
+						hit_sparks.append({
+							"pos": e_pos,
+							"vel": Vector2(cos(angle), sin(angle)) * speed,
+							"color": Color(0.6, 0.2, 1.0),
+							"life": randf_range(0.2, 0.6),
+							"size": randf_range(3.0, 7.0)
+						})
 			
 		"game_over":
 			var winner = _get_safe_string(data, "winner_team", "")
@@ -820,9 +851,9 @@ func _spawn_damage_juices(new_list: Array, old_hps: Dictionary):
 						"life": 0.8
 					})
 				
-				# Hit Sparks (Capped and reduced from 6 to 3 sparks to avoid WebGL / Mobile drawing lag)
-				if hit_sparks.size() < 75:
-					for i in range(3):
+				# Hit Sparks (Capped to avoid WebGL / Mobile drawing lag)
+				if hit_sparks.size() < 40:
+					for i in range(2):
 						var speed = randf_range(80, 200)
 						var angle = randf_range(0, TAU)
 						hit_sparks.append({
@@ -1010,6 +1041,41 @@ func _on_world_draw():
 		# Glowing cyan neon border
 		world_node.draw_rect(r, Color(0.15, 0.7, 1.0, 0.22), false, 5.0)
 		world_node.draw_rect(r, Color(0.2, 0.8, 1.0, 0.85), false, 2.0)
+
+	# 4.1 Draw New Map Zones (Portals, HealZones, TrapZones)
+	for hz in heal_zones:
+		var pos = _get_safe_vector2(hz, "pos")
+		var radius = _get_safe_float(hz, "radius", 100.0)
+		if pos.distance_to(cam_pos) > radius + 800.0: continue
+		world_node.draw_circle(pos, radius, Color(0.1, 0.8, 0.3, 0.1 + 0.05 * sin(time_ms*0.002)))
+		world_node.draw_arc(pos, radius, 0.0, TAU, 32, Color(0.3, 1.0, 0.5, 0.5), 3.0)
+		world_node.draw_string(system_font, pos + Vector2(-35, 0), "+ HEAL ZONE", HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color(0.4, 1.0, 0.6))
+		for i in range(3):
+			var r_offset = fmod(time_ms*0.05 + i*40.0, radius)
+			world_node.draw_arc(pos, r_offset, 0.0, TAU, 24, Color(0.2, 1.0, 0.4, 0.3 * (1.0 - r_offset/radius)), 1.5)
+
+	for tz in trap_zones:
+		var pos = _get_safe_vector2(tz, "pos")
+		var radius = _get_safe_float(tz, "radius", 100.0)
+		if pos.distance_to(cam_pos) > radius + 800.0: continue
+		world_node.draw_circle(pos, radius, Color(0.9, 0.2, 0.0, 0.2 + 0.1 * sin(time_ms*0.005)))
+		world_node.draw_arc(pos, radius, 0.0, TAU, 32, Color(1.0, 0.3, 0.1, 0.6), 3.0)
+		world_node.draw_string(system_font, pos + Vector2(-35, 0), "LAVA TRAP", HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color(1.0, 0.4, 0.2))
+		for i in range(5):
+			var bubble_a = time_ms*0.001 + i
+			var bubble_r = fmod(time_ms*0.04 + i*20.0, radius)
+			world_node.draw_circle(pos + Vector2(cos(bubble_a), sin(bubble_a)) * bubble_r, 4.0, Color(1.0, 0.5, 0.1, 0.8))
+
+	for pt in portals:
+		var pos = _get_safe_vector2(pt, "pos")
+		var radius = _get_safe_float(pt, "radius", 45.0)
+		if pos.distance_to(cam_pos) > radius + 800.0: continue
+		var p_a = time_ms * 0.003
+		world_node.draw_circle(pos, radius, Color(0.5, 0.1, 0.9, 0.2))
+		world_node.draw_arc(pos, radius, p_a, p_a + TAU, 24, Color(0.8, 0.3, 1.0, 0.7), 4.0)
+		world_node.draw_arc(pos, radius - 8.0, -p_a, -p_a + TAU, 16, Color(0.6, 0.1, 1.0, 0.5), 2.0)
+		world_node.draw_circle(pos, radius*0.4, Color(0.4, 0.0, 0.8, 0.6))
+		world_node.draw_string(system_font, pos + Vector2(-30, 4), "PORTAL", HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(0.9, 0.6, 1.0))
 
 	# 5. Draw Gems (Rotating & Floating items with drop shadows)
 	var gems_list = _get_safe_array(game_state, "gems")
@@ -1414,7 +1480,8 @@ func _update_smooth_positions(delta):
 			smooth_positions[id] = server_pos
 			proj_trails[id] = [server_pos]
 		else:
-			var t = clamp(26.0 * delta, 0.0, 1.0)
+			# Increased projectile interpolation speed to prevent hit delay
+			var t = clamp(45.0 * delta, 0.0, 1.0)
 			smooth_positions[id] = smooth_positions[id].lerp(server_pos, t)
 			if not proj_trails.has(id):
 				proj_trails[id] = []

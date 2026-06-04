@@ -50,9 +50,10 @@ type Player struct {
 	InvincibleTimer float64      `json:"invincible_timer"`
 	GiantTimer    float64        `json:"giant_timer"`
 	HasteTimer    float64        `json:"haste_timer"`
-	DashTimer     float64        `json:"dash_timer"`
-	DashCooldown  float64        `json:"-"`
-	IsBot         bool           `json:"is_bot"`
+	DashTimer       float64        `json:"dash_timer"`
+	DashCooldown    float64        `json:"-"`
+	TeleportCooldown float64       `json:"-"`
+	IsBot           bool           `json:"is_bot"`
 	Hero          string         `json:"hero"`
 
 	// Send/Receive
@@ -87,6 +88,27 @@ type Wall struct {
 	Y      float64 `json:"y"`
 	Width  float64 `json:"w"`
 	Height float64 `json:"h"`
+}
+
+type Portal struct {
+	ID        string  `json:"id"`
+	Position  Vector2 `json:"pos"`
+	TargetPos Vector2 `json:"target_pos"`
+	Radius    float64 `json:"radius"`
+}
+
+type HealZone struct {
+	ID       string  `json:"id"`
+	Position Vector2 `json:"pos"`
+	Radius   float64 `json:"radius"`
+	HealRate float64 `json:"heal_rate"`
+}
+
+type TrapZone struct {
+	ID         string  `json:"id"`
+	Position   Vector2 `json:"pos"`
+	Radius     float64 `json:"radius"`
+	DamageRate float64 `json:"damage_rate"`
 }
 
 // Map Dimensions
@@ -125,6 +147,9 @@ type ServerMessage struct {
 	KillerName    string            `json:"killer_name,omitempty"`
 	VictimName    string            `json:"victim_name,omitempty"`
 	Walls         []Wall            `json:"walls,omitempty"`
+	Portals       []Portal          `json:"portals,omitempty"`
+	HealZones     []HealZone        `json:"heal_zones,omitempty"`
+	TrapZones     []TrapZone        `json:"trap_zones,omitempty"`
 	EffectType    string            `json:"effect_type,omitempty"`
 	EffectX       float64           `json:"effect_x,omitempty"`
 	EffectY       float64           `json:"effect_y,omitempty"`
