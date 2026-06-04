@@ -148,6 +148,7 @@ func _ready():
 	
 	# Connect HUD signals
 	$UI/HUD/ChatBox/ChatInput.text_submitted.connect(_on_chat_submitted)
+	$UI/HUD/ChatBox/ChatInput.focus_entered.connect(func(): _on_web_mobile_input_prompt($UI/HUD/ChatBox/ChatInput, "Enter Chat Message:"))
 	
 	# Connect skill choices buttons
 	$UI/SkillPanel/VBox/Choices/Choice1.pressed.connect(func(): _on_skill_chosen(0))
@@ -502,6 +503,8 @@ func _create_lobby_ui():
 	# Hook up enter key connections in server config panel
 	host_input.text_submitted.connect(func(txt): port_input.grab_focus())
 	port_input.text_submitted.connect(func(txt): _on_connect_server_pressed(host_input.text, port_input.text))
+	host_input.focus_entered.connect(func(): _on_web_mobile_input_prompt(host_input, "Enter Server IP / Host Address:"))
+	port_input.focus_entered.connect(func(): _on_web_mobile_input_prompt(port_input, "Enter Server Port:"))
 	
 	var s_err_lbl = Label.new()
 	s_err_lbl.name = "ErrorLabel"
@@ -583,6 +586,8 @@ func _create_lobby_ui():
 	# Hook up enter key connections in auth panel
 	user_input.text_submitted.connect(func(txt): pass_input.grab_focus())
 	pass_input.text_submitted.connect(func(txt): _on_auth_pressed(user_input.text, pass_input.text, false))
+	user_input.focus_entered.connect(func(): _on_web_mobile_input_prompt(user_input, "Enter Username:"))
+	pass_input.focus_entered.connect(func(): _on_web_mobile_input_prompt(pass_input, "Enter Password:", true))
 	
 	var a_err_lbl = Label.new()
 	a_err_lbl.name = "ErrorLabel"
@@ -2464,3 +2469,24 @@ func _get_safe_vector2(dict: Variant, key: String, default_val: Vector2 = Vector
 		_get_safe_float(d, "x", default_val.x),
 		_get_safe_float(d, "y", default_val.y)
 	)
+
+func _on_web_mobile_input_prompt(input_node: LineEdit, prompt_title: String, is_secret: bool = false):
+	if OS.has_feature("web"):
+		var is_mobile = JavaScriptBridge.eval("/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)")
+		if is_mobile:
+			# Release focus immediately to avoid locking the UI/keyboard state in canvas
+			input_node.release_focus()
+			
+			var default_val = input_node.text
+			var secret_warning = " (Visible as you type)" if is_secret else ""
+			var js_code = "prompt('" + prompt_title + secret_warning + "', '" + default_val.replace("'", "\\'") + "')"
+			var result = JavaScriptBridge.eval(js_code)
+			if result != null:
+				var typed_text = str(result).strip_edges()
+				input_node.text = typed_text
+				input_node.text_changed.emit(typed_text)
+				
+				# If it is the chat input, trigger submission directly
+				if input_node.name == "ChatInput":
+					_on_chat_submitted(typed_text)
+					input_node.text = ""
