@@ -1,24 +1,20 @@
 config_version=5
 
 [application]
-
 config/name="Archer Push Roguelike"
 run/main_scene="res://Main.tscn"
-
-[input_devices]
-
-pointing/emulate_touch_from_mouse=false
-pointing/emulate_mouse_from_touch=false
-config/features=PackedStringArray("4.2", "Mobile")
+config/features=PackedStringArray("4.3", "Mobile")
 
 [display]
-
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[rendering]
+[input_devices]
+pointing/emulate_touch_from_mouse=false
+pointing/emulate_mouse_from_touch=false
 
+[rendering]
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
