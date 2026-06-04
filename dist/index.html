@@ -150,9 +150,8 @@ const engine = new Engine(GODOT_CONFIG);
 
 	const missing = Engine.getMissingFeatures({
 		threads: GODOT_THREADS_ENABLED,
-	});
+	}).filter(function(x) { return !x.includes("Secure Context"); });
 
-	missing = missing.filter(function(x) { return !x.includes("Secure Context"); });
 	if (missing.length !== 0) {
 		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
 			// There's a chance that installing the service worker would fix the issue

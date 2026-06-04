@@ -26,11 +26,21 @@ if [ -f "./godot" ]; then
 with open('dist/index.html', 'r', encoding='utf-8') as f:
     content = f.read()
 
-target = 'if (missing.length !== 0) {'
-replacement = 'missing = missing.filter(function(x) { return !x.includes(\"Secure Context\"); });\n\tif (missing.length !== 0) {'
+# Filter out the Secure Context warning directly on the const declaration
+target_lf = 'threads: GODOT_THREADS_ENABLED,\n\t});'
+replacement_lf = 'threads: GODOT_THREADS_ENABLED,\n\t}).filter(function(x) { return !x.includes(\"Secure Context\"); });'
+target_crlf = 'threads: GODOT_THREADS_ENABLED,\r\n\t});'
+replacement_crlf = 'threads: GODOT_THREADS_ENABLED,\r\n\t}).filter(function(x) { return !x.includes(\"Secure Context\"); });'
 
-if target in content:
-    content = content.replace(target, replacement)
+patched = False
+if target_lf in content:
+    content = content.replace(target_lf, replacement_lf)
+    patched = True
+elif target_crlf in content:
+    content = content.replace(target_crlf, replacement_crlf)
+    patched = True
+
+if patched:
     with open('dist/index.html', 'w', encoding='utf-8') as f:
         f.write(content)
     print('Successfully disabled secure context check!')
