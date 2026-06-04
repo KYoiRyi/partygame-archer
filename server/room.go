@@ -562,14 +562,7 @@ func (r *Room) tick(dt float64) {
 			r.resolveWallCollisions(&p.Position, 25.0)
 		}
 		
-		// If standing still, Auto-Shoot nearest enemy in range
-		if !p.Moving && p.ShootCooldown <= 0 {
-			nearestEnemy, _ := r.findNearestEnemy(p.Position, p.Team, 500.0)
-			if nearestEnemy != nil {
-				angle := math.Atan2(nearestEnemy.Y - p.Position.Y, nearestEnemy.X - p.Position.X)
-				r.playerShoot(p, angle)
-			}
-		}
+		// Removed auto-shoot to fix "automatic shooting" issue reported by user
 
 		// Map Zones interactions
 		for _, hz := range r.HealZones {
