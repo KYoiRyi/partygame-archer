@@ -378,6 +378,10 @@ func _create_lobby_ui():
 	bg_panel.name = "CustomBG"
 	$UI/Lobby.add_child(bg_panel)
 	bg_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg_panel.offset_left = 0
+	bg_panel.offset_right = 0
+	bg_panel.offset_top = 0
+	bg_panel.offset_bottom = 0
 	var bg_style = StyleBoxFlat.new()
 	bg_style.bg_color = Color(0.04, 0.05, 0.08, 0.96)
 	bg_panel.add_theme_stylebox_override("panel", bg_style)
@@ -419,6 +423,10 @@ func _create_lobby_ui():
 	server_panel.name = "ServerConfigPanel"
 	$UI/Lobby.add_child(server_panel)
 	server_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	server_panel.offset_left = 0
+	server_panel.offset_right = 0
+	server_panel.offset_top = 0
+	server_panel.offset_bottom = 0
 	
 	var srv_box = PanelContainer.new()
 	srv_box.custom_minimum_size = Vector2(420, 320)
@@ -493,6 +501,10 @@ func _create_lobby_ui():
 	auth_panel.visible = false
 	$UI/Lobby.add_child(auth_panel)
 	auth_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	auth_panel.offset_left = 0
+	auth_panel.offset_right = 0
+	auth_panel.offset_top = 0
+	auth_panel.offset_bottom = 0
 	
 	var auth_box = PanelContainer.new()
 	auth_box.custom_minimum_size = Vector2(400, 380)
@@ -584,6 +596,10 @@ func _create_lobby_ui():
 	profile_panel.visible = false
 	$UI/Lobby.add_child(profile_panel)
 	profile_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	profile_panel.offset_left = 0
+	profile_panel.offset_right = 0
+	profile_panel.offset_top = 0
+	profile_panel.offset_bottom = 0
 	
 	var menu_box = PanelContainer.new()
 	menu_box.name = "PanelContainer"
@@ -689,6 +705,10 @@ func _create_lobby_ui():
 	room_panel.visible = false
 	$UI/Lobby.add_child(room_panel)
 	room_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	room_panel.offset_left = 0
+	room_panel.offset_right = 0
+	room_panel.offset_top = 0
+	room_panel.offset_bottom = 0
 	
 	var r_box = PanelContainer.new()
 	r_box.name = "PanelContainer"
