@@ -95,6 +95,23 @@ var auth_panel: Control
 var profile_panel: Control
 var room_panel: Control
 
+# Programmatic UI Control References
+var server_err_lbl: Label
+var auth_err_lbl: Label
+var profile_username_lbl: Label
+var profile_stats_lbl: Label
+var room_list_container: VBoxContainer
+var room_title_lbl: Label
+var room_players_container: VBoxContainer
+var room_status_lbl: Label
+var room_start_btn: Button
+var server_host_input: LineEdit
+var server_port_input: LineEdit
+var auth_user_input: LineEdit
+var auth_pass_input: LineEdit
+var room_hero_select: OptionButton
+
+
 func _save_token(token: String, username: String, host: String, port: String):
 	var f = FileAccess.open("user://auth_token.txt", FileAccess.WRITE)
 	if f:
@@ -466,6 +483,7 @@ func _create_lobby_ui():
 	host_input.custom_minimum_size = Vector2(300, 36)
 	host_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	svbox.add_child(host_input)
+	server_host_input = host_input
 	
 	var port_input = LineEdit.new()
 	port_input.name = "PortInput"
@@ -474,6 +492,7 @@ func _create_lobby_ui():
 	port_input.custom_minimum_size = Vector2(300, 36)
 	port_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	svbox.add_child(port_input)
+	server_port_input = port_input
 	
 	# Hook up enter key connections in server config panel
 	host_input.text_submitted.connect(func(txt): port_input.grab_focus())
@@ -486,6 +505,7 @@ func _create_lobby_ui():
 	s_err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
 	s_err_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	svbox.add_child(s_err_lbl)
+	server_err_lbl = s_err_lbl
 	
 	var connect_btn = Button.new()
 	connect_btn.text = "CONNECT TO SERVER"
@@ -544,6 +564,7 @@ func _create_lobby_ui():
 	user_input.custom_minimum_size = Vector2(300, 36)
 	user_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	avbox.add_child(user_input)
+	auth_user_input = user_input
 	
 	var pass_input = LineEdit.new()
 	pass_input.name = "PasswordInput"
@@ -552,6 +573,7 @@ func _create_lobby_ui():
 	pass_input.custom_minimum_size = Vector2(300, 36)
 	pass_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	avbox.add_child(pass_input)
+	auth_pass_input = pass_input
 	
 	# Hook up enter key connections in auth panel
 	user_input.text_submitted.connect(func(txt): pass_input.grab_focus())
@@ -564,6 +586,7 @@ func _create_lobby_ui():
 	a_err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
 	a_err_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	avbox.add_child(a_err_lbl)
+	auth_err_lbl = a_err_lbl
 	
 	var a_btn_hbox = HBoxContainer.new()
 	a_btn_hbox.add_theme_constant_override("separation", 15)
@@ -627,6 +650,7 @@ func _create_lobby_ui():
 	profile_label.add_theme_font_size_override("font_size", 20)
 	profile_label.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
 	mvbox.add_child(profile_label)
+	profile_username_lbl = profile_label
 	
 	var stats_label_node = Label.new()
 	stats_label_node.name = "StatsLabel"
@@ -635,6 +659,7 @@ func _create_lobby_ui():
 	stats_label_node.add_theme_font_size_override("font_size", 14)
 	stats_label_node.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	mvbox.add_child(stats_label_node)
+	profile_stats_lbl = stats_label_node
 	
 	var config_hbox = HBoxContainer.new()
 	config_hbox.name = "HBoxContainer"
@@ -673,6 +698,7 @@ func _create_lobby_ui():
 	var room_list_box = VBoxContainer.new()
 	room_list_box.name = "RoomList"
 	scroll.add_child(room_list_box)
+	room_list_container = room_list_box
 	
 	var room_actions = HBoxContainer.new()
 	room_actions.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -736,6 +762,7 @@ func _create_lobby_ui():
 	r_title.add_theme_font_size_override("font_size", 20)
 	r_title.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
 	rvbox.add_child(r_title)
+	room_title_lbl = r_title
 	
 	var r_desc = Label.new()
 	r_desc.text = "PLAYERS IN ROOM LOBBY:"
@@ -766,6 +793,7 @@ func _create_lobby_ui():
 	r_hero_select.selected = 0
 	r_hero_select.item_selected.connect(_on_room_hero_selected)
 	r_hero_hbox.add_child(r_hero_select)
+	room_hero_select = r_hero_select
 	
 	var r_scroll = ScrollContainer.new()
 	r_scroll.custom_minimum_size = Vector2(400, 150)
@@ -776,6 +804,7 @@ func _create_lobby_ui():
 	var r_players_box = VBoxContainer.new()
 	r_players_box.name = "PlayersList"
 	r_scroll.add_child(r_players_box)
+	room_players_container = r_players_box
 	
 	var r_status = Label.new()
 	r_status.name = "StatusLabel"
@@ -784,6 +813,7 @@ func _create_lobby_ui():
 	r_status.add_theme_font_size_override("font_size", 13)
 	r_status.add_theme_color_override("font_color", Color(0.9, 0.8, 0.3))
 	rvbox.add_child(r_status)
+	room_status_lbl = r_status
 	
 	var start_game_btn = Button.new()
 	start_game_btn.name = "StartGameButton"
@@ -792,6 +822,7 @@ func _create_lobby_ui():
 	start_game_btn.visible = false
 	start_game_btn.pressed.connect(_on_start_match_pressed)
 	rvbox.add_child(start_game_btn)
+	room_start_btn = start_game_btn
 	
 	var leave_btn = Button.new()
 	leave_btn.text = "🚪 LEAVE ROOM"
@@ -837,8 +868,8 @@ func _on_connect_server_pressed(host: String, port: String):
 	server_port = port
 	
 	# Release focus to close virtual keyboard
-	var host_input = server_panel.find_child("HostInput")
-	var port_input = server_panel.find_child("PortInput")
+	var host_input = server_host_input
+	var port_input = server_port_input
 	if host_input: host_input.release_focus()
 	if port_input: port_input.release_focus()
 	
@@ -893,8 +924,8 @@ func _on_auth_pressed(user: String, pass_word: String, register: bool):
 		return
 		
 	# Release focus to close virtual keyboard
-	var user_input = auth_panel.find_child("UsernameInput")
-	var pass_input = auth_panel.find_child("PasswordInput")
+	var user_input = auth_user_input
+	var pass_input = auth_pass_input
 	if user_input: user_input.release_focus()
 	if pass_input: pass_input.release_focus()
 		
@@ -946,7 +977,7 @@ func _show_server_config_panel():
 	profile_panel.visible = false
 	room_panel.visible = false
 	
-	var err_lbl = server_panel.find_child("ErrorLabel")
+	var err_lbl = server_err_lbl
 	if err_lbl: err_lbl.text = ""
 
 func _show_auth_panel():
@@ -955,7 +986,7 @@ func _show_auth_panel():
 	profile_panel.visible = false
 	room_panel.visible = false
 	
-	var err_lbl = auth_panel.find_child("ErrorLabel")
+	var err_lbl = auth_err_lbl
 	if err_lbl: err_lbl.text = ""
 
 func _show_profile_panel():
@@ -964,8 +995,8 @@ func _show_profile_panel():
 	profile_panel.visible = true
 	room_panel.visible = false
 	
-	var profile_lbl = profile_panel.find_child("ProfileLabel")
-	var stats_lbl = profile_panel.find_child("StatsLabel")
+	var profile_lbl = profile_username_lbl
+	var stats_lbl = profile_stats_lbl
 	
 	if profile_lbl:
 		profile_lbl.text = "🏆 Welcome, " + auth_username + "!"
@@ -981,36 +1012,36 @@ func _show_room_panel():
 	profile_panel.visible = false
 	room_panel.visible = true
 	
-	var r_title = room_panel.find_child("RoomTitle")
+	var r_title = room_title_lbl
 	if r_title:
 		r_title.text = "🏠 ROOM: " + selected_room_id
 		
-	var start_btn = room_panel.find_child("StartGameButton")
+	var start_btn = room_start_btn
 	if start_btn: start_btn.visible = false
 	
-	var status_lbl = room_panel.find_child("StatusLabel")
+	var status_lbl = room_status_lbl
 	if status_lbl: status_lbl.text = "Connecting to room lobby..."
 
 func _show_server_error(txt: String):
-	var err_lbl = server_panel.find_child("ErrorLabel")
+	var err_lbl = server_err_lbl
 	if err_lbl:
 		err_lbl.text = txt
 		err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
 
 func _show_server_status(txt: String):
-	var err_lbl = server_panel.find_child("ErrorLabel")
+	var err_lbl = server_err_lbl
 	if err_lbl:
 		err_lbl.text = txt
 		err_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
 
 func _show_auth_error(txt: String):
-	var err_lbl = auth_panel.find_child("ErrorLabel")
+	var err_lbl = auth_err_lbl
 	if err_lbl:
 		err_lbl.text = txt
 		err_lbl.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
 
 func _show_auth_status(txt: String):
-	var err_lbl = auth_panel.find_child("ErrorLabel")
+	var err_lbl = auth_err_lbl
 	if err_lbl:
 		err_lbl.text = txt
 		err_lbl.add_theme_color_override("font_color", Color(0.6, 0.8, 1.0))
@@ -1026,7 +1057,7 @@ func _refresh_room_list():
 	)
 
 func _populate_room_list(rooms: Array):
-	var list_box = profile_panel.find_child("RoomList")
+	var list_box = room_list_container
 	if not list_box: return
 	
 	for child in list_box.get_children():
@@ -1115,7 +1146,7 @@ func _on_logout_pressed():
 
 func _update_room_lobby_list(room_players: Array, host_id: String):
 	if not room_panel: return
-	var r_players_box = room_panel.find_child("PlayersList")
+	var r_players_box = room_players_container
 	if not r_players_box: return
 	
 	for child in r_players_box.get_children():
@@ -1144,8 +1175,8 @@ func _update_room_lobby_list(room_players: Array, host_id: String):
 			name_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5)) # Highlight current player
 		hbox.add_child(name_lbl)
 		
-	var start_btn = room_panel.find_child("StartGameButton")
-	var status_lbl = room_panel.find_child("StatusLabel")
+	var start_btn = room_start_btn
+	var status_lbl = room_status_lbl
 	
 	if is_me_host:
 		if start_btn: start_btn.visible = true
@@ -1207,7 +1238,7 @@ func _process(delta):
 			is_connected = true
 			is_connecting = false
 			# Update hero select inside the Room Lobby to match profile hero select
-			var r_hero_select = room_panel.find_child("RoomHeroSelect")
+			var r_hero_select = room_hero_select
 			if r_hero_select and hero_select_btn:
 				r_hero_select.selected = hero_select_btn.selected
 			add_chat_message("System", "Successfully connected to Room Lobby!")
