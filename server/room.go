@@ -474,6 +474,9 @@ func (r *Room) playerShoot(p *Player, baseAngle float64) {
 	
 	// Base Stats
 	baseDamage := 15.0 + float64(p.Skills[SkillDamageBoost])*5
+	if p.IsBot {
+		baseDamage *= 0.70 // Reduce bot damage by 30% to make them easier
+	}
 	atkSpeedLvl := float64(p.Skills[SkillAtkSpeed])
 	
 	baseCooldown := 0.25
@@ -673,6 +676,7 @@ func (r *Room) tick(dt float64) {
 
 		if p.IsBot {
 			r.updateBotAI(p, dt)
+			speedMultiplier *= 0.70 // Make bots 30% slower to lower difficulty
 		}
 		
 		// Update position
@@ -1354,7 +1358,9 @@ func (r *Room) updateBotAI(p *Player, dt float64) {
 		
 		// Shoot if ready
 		if p.ShootCooldown <= 0 {
-			r.playerShoot(p, angle)
+			// Bots have a +/- 16 degree aim error spread (0.56 total spread in rad) to make them less accurate
+			aimError := (rand.Float64() - 0.5) * 0.56
+			r.playerShoot(p, angle + aimError)
 		}
 		
 		// Movement: kite archer style
