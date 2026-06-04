@@ -221,10 +221,9 @@ func _input(event: InputEvent):
 			if joystick_draw_node: joystick_draw_node.queue_redraw()
 
 	if event is InputEventScreenTouch:
-		if $UI/SkillPanel.visible:
-			return # Don't move or aim while picking skills
-			
 		if event.pressed:
+			if $UI/SkillPanel.visible:
+				return # Don't move or aim while picking skills
 			# Touch pressed
 			if event.position.x < get_viewport_rect().size.x / 2.0:
 				# Left half: Floating Joystick
@@ -558,7 +557,7 @@ func _send_movement_if_changed():
 	
 	if dir_changed_significantly or angle_changed_significantly or (current_input_dir == Vector2.ZERO and last_move_dir != Vector2.ZERO):
 		var now = Time.get_ticks_msec()
-		if now - last_move_send_time > 50 or current_input_dir == Vector2.ZERO: # 20hz limit, except when stopping
+		if now - last_move_send_time > 16 or current_input_dir == Vector2.ZERO: # 60hz limit, except when stopping
 			last_move_send_time = now
 			last_move_dir = current_input_dir
 			last_angle = current_input_angle

@@ -85,7 +85,7 @@ func (r *Room) initMap() {
 }
 
 func (r *Room) Start() {
-	ticker := time.NewTicker(33 * time.Millisecond) // ~30 FPS
+	ticker := time.NewTicker(16 * time.Millisecond) // 60 updates per second for minimal latency
 	go func() {
 		defer ticker.Stop()
 		lastTick := time.Now()
