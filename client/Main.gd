@@ -188,6 +188,8 @@ func _ready():
 	dash_btn.offset_top = -200
 	dash_btn.offset_right = -120
 	dash_btn.offset_bottom = -120
+	dash_btn.mouse_filter = Control.MOUSE_FILTER_IGNORE # Use IGNORE to let all multitouch events propagate to _unhandled_input cleanly
+	
 	var sb = StyleBoxFlat.new()
 	sb.bg_color = Color(0.1, 0.5, 1.0, 0.5)
 	sb.corner_radius_top_left = 40
@@ -195,7 +197,6 @@ func _ready():
 	sb.corner_radius_bottom_left = 40
 	sb.corner_radius_bottom_right = 40
 	dash_btn.add_theme_stylebox_override("normal", sb)
-	dash_btn.pressed.connect(_on_dash_pressed)
 	
 	# Initial window setup
 	get_viewport().files_dropped.connect(func(files): pass)
@@ -254,6 +255,10 @@ func _unhandled_input(event: InputEvent):
 			return # Ignore emulated mouse click from touch
 		if event.button_index == MOUSE_BUTTON_LEFT and not is_chatting:
 			if event.pressed:
+				var dash_btn = $UI/HUD.get_node_or_null("DashButton")
+				if dash_btn and dash_btn.get_global_rect().has_point(event.position):
+					_on_dash_pressed()
+					return
 				mouse_aim_active = true
 				if joystick_draw_node: joystick_draw_node.queue_redraw()
 			else:
