@@ -15,10 +15,15 @@ type Room struct {
 	Players     map[string]*Player
 	Projectiles map[string]*Projectile
 	Gems        map[string]*Gem
+	Crates      map[string]*Crate
 	Walls       []Wall
 	Portals     []Portal
 	HealZones   []HealZone
 	TrapZones   []TrapZone
+	
+	GlobalEvent      string
+	GlobalEventTimer float64
+	GlobalEventTimeUntilNext float64
 	
 	mu          sync.RWMutex
 	register    chan *Player
@@ -45,11 +50,13 @@ func NewRoom(id string) *Room {
 		Players:     make(map[string]*Player),
 		Projectiles: make(map[string]*Projectile),
 		Gems:        make(map[string]*Gem),
+		Crates:      make(map[string]*Crate),
 		Walls:       make([]Wall, 0),
 		register:    make(chan *Player, 10),
 		unregister:  make(chan *Player, 10),
-		inputChan:   make(chan playerInput, 200),
+		inputChan:   make(chan playerInput, 100),
 		stopChan:    make(chan struct{}),
+		GlobalEventTimeUntilNext: 60.0,
 	}
 	
 	r.initMap()
@@ -103,6 +110,10 @@ func (r *Room) initMap() {
 	r.TrapZones = []TrapZone{
 		{ID: "t1", Position: Vector2{X: 1500, Y: 200}, Radius: 120, DamageRate: 15.0},
 		{ID: "t2", Position: Vector2{X: 1500, Y: 1000}, Radius: 120, DamageRate: 15.0},
+	}
+
+	for i := 0; i < 8; i++ {
+		r.spawnCrate()
 	}
 
 	r.fillRoomWithBots()
@@ -301,6 +312,21 @@ func (r *Room) handlePlayerInput(playerID string, msg ClientMessage) {
 	}
 }
 
+func (r *Room) spawnCrate() {
+	id := fmt.Sprintf("crate_%d", r.entityIDSeq)
+	r.entityIDSeq++
+	
+	x := 100 + rand.Float64()*(MapWidth-200)
+	y := 100 + rand.Float64()*(MapHeight-200)
+	
+	r.Crates[id] = &Crate{
+		ID: id,
+		Position: Vector2{X: x, Y: y},
+		HP: 3,
+		Radius: 40.0,
+	}
+}
+
 func (r *Room) respawnPlayer(p *Player) {
 	p.Dead = false
 	p.HP = p.MaxHP
@@ -322,6 +348,26 @@ func (r *Room) spawnGem(gemType string) {
 	// Spawn anywhere on the map evenly
 	x := 100 + rand.Float64()*(MapWidth-200)
 	y := 100 + rand.Float64()*(MapHeight-200)
+
+	g := &Gem{
+		ID:       id,
+		Position: Vector2{X: x, Y: y},
+		XPValue:  15,
+		Type:     gemType,
+	}
+	if gemType == "hp" {
+		g.XPValue = 0 // HP gem gives health instead of XP
+	}
+	r.Gems[id] = g
+}
+
+func (r *Room) spawnGemAt(gemType string, x, y float64) {
+	id := r.nextID("gem")
+	
+	if x < 20 { x = 20 }
+	if x > MapWidth-20 { x = MapWidth-20 }
+	if y < 20 { y = 20 }
+	if y > MapHeight-20 { y = MapHeight-20 }
 
 	g := &Gem{
 		ID:       id,
@@ -562,17 +608,34 @@ func (r *Room) tick(dt float64) {
 			r.resolveWallCollisions(&p.Position, 25.0)
 		}
 		
-		// Removed auto-shoot to fix "automatic shooting" issue reported by user
+		// Apply Knockback
+		if p.Knockback.X != 0 || p.Knockback.Y != 0 {
+			p.Position.X += p.Knockback.X * dt
+			p.Position.Y += p.Knockback.Y * dt
+			
+			// Damping
+			p.Knockback.X *= (1.0 - 5.0*dt)
+			p.Knockback.Y *= (1.0 - 5.0*dt)
+			if math.Abs(p.Knockback.X) < 10 { p.Knockback.X = 0 }
+			if math.Abs(p.Knockback.Y) < 10 { p.Knockback.Y = 0 }
+			
+			// Check wall collision for knockback
+			r.resolveWallCollisions(&p.Position, 25.0)
+		}
 
 		// Map Zones interactions
 		for _, hz := range r.HealZones {
 			dx := p.Position.X - hz.Position.X
 			dy := p.Position.Y - hz.Position.Y
 			if math.Sqrt(dx*dx+dy*dy) < hz.Radius {
-				if p.HP < p.MaxHP {
-					p.HP += hz.HealRate * dt
-					if p.HP > p.MaxHP {
-						p.HP = p.MaxHP
+				if r.GlobalEvent == "POISON_FOUNTAIN" {
+					r.damagePlayer(p, hz.HealRate * dt, "") // Damaged instead of healed!
+				} else {
+					if p.HP < p.MaxHP {
+						p.HP += hz.HealRate * dt
+						if p.HP > p.MaxHP {
+							p.HP = p.MaxHP
+						}
 					}
 				}
 			}
@@ -679,6 +742,42 @@ func (r *Room) tick(dt float64) {
 				break
 			}
 		}
+	}
+	// Update Global Events
+	if r.GlobalEventTimer > 0 {
+		r.GlobalEventTimer -= dt
+		if r.GlobalEventTimer <= 0 {
+			r.GlobalEvent = ""
+		}
+	}
+	r.GlobalEventTimeUntilNext -= dt
+	if r.GlobalEventTimeUntilNext <= 0 {
+		r.GlobalEventTimeUntilNext = 60.0
+		r.GlobalEventTimer = 10.0
+		// Pick random event
+		events := []string{"POISON_FOUNTAIN", "SPEED_BOOST", "DARKNESS"}
+		r.GlobalEvent = events[rand.Intn(len(events))]
+		r.broadcastChat("system", "⚠️ GLOBAL EVENT: " + r.GlobalEvent + " FOR 10 SECONDS!")
+		
+		if r.GlobalEvent == "SPEED_BOOST" {
+			for _, p := range r.Players {
+				if !p.Dead { p.HasteTimer = 10.0 }
+			}
+		}
+	}
+
+	// Update Bounty Crown
+	var topPlayer *Player
+	maxScore := 0
+	for _, p := range r.Players {
+		p.HasCrown = false
+		if p.Score > maxScore {
+			maxScore = p.Score
+			topPlayer = p
+		}
+	}
+	if topPlayer != nil && maxScore >= 100 {
+		topPlayer.HasCrown = true
 	}
 
 	// Broadcast updated states to all players
@@ -819,10 +918,44 @@ func (r *Room) checkProjectileHit(proj *Projectile) {
 		dy := proj.Position.Y - enemy.Position.Y
 		dist := math.Sqrt(dx*dx + dy*dy)
 		if dist < 25.0 {
+			// Apply Knockback
+			kbForce := 300.0 // Push force
+			pSpeed := math.Sqrt(proj.Velocity.X*proj.Velocity.X + proj.Velocity.Y*proj.Velocity.Y)
+			if pSpeed > 0 {
+				enemy.Knockback.X = (proj.Velocity.X / pSpeed) * kbForce
+				enemy.Knockback.Y = (proj.Velocity.Y / pSpeed) * kbForce
+			}
+
 			r.damagePlayer(enemy, proj.Damage, proj.OwnerID)
 			r.applyProjectileEffects(proj.Effects, enemy)
 			targetHit = true
 			break
+		}
+	}
+
+	// Hit Crates
+	if !targetHit {
+		for cID, crate := range r.Crates {
+			dx := proj.Position.X - crate.Position.X
+			dy := proj.Position.Y - crate.Position.Y
+			if math.Sqrt(dx*dx + dy*dy) < crate.Radius {
+				crate.HP--
+				if crate.HP <= 0 {
+					// Drop items
+					if rand.Float64() < 0.2 {
+						r.spawnGemAt("bomb", crate.Position.X, crate.Position.Y)
+					} else {
+						for i := 0; i < 3; i++ {
+							r.spawnGemAt("xp", crate.Position.X + rand.Float64()*40-20, crate.Position.Y + rand.Float64()*40-20)
+						}
+					}
+					delete(r.Crates, cID)
+					// Respawn another crate somewhere else
+					r.spawnCrate()
+				}
+				targetHit = true
+				break
+			}
 		}
 	}
 
@@ -861,6 +994,15 @@ func (r *Room) damagePlayer(p *Player, dmg float64, attackerID string) {
 				att.HP = att.MaxHP
 				r.triggerLevelUp(att)
 			}
+		}
+		
+		// If killed player had Crown, drop massive loot
+		if p.HasCrown {
+			for i := 0; i < 15; i++ {
+				r.spawnGemAt("xp", p.Position.X + rand.Float64()*100-50, p.Position.Y + rand.Float64()*100-50)
+			}
+			r.spawnGemAt("hp", p.Position.X, p.Position.Y)
+			r.broadcastChat("system", fmt.Sprintf("👑 THE BOUNTY TARGET %s WAS DEFEATED! MASSIVE LOOT DROPPED!", p.Name))
 		}
 		
 		r.broadcastKillFeed(attackerName, p.Name)
@@ -995,6 +1137,8 @@ func (r *Room) sendStateToAll() {
 		Players:     make([]*Player, 0, len(r.Players)),
 		Projectiles: make([]*Projectile, 0, len(r.Projectiles)),
 		Gems:        make([]*Gem, 0, len(r.Gems)),
+		Crates:      make([]*Crate, 0, len(r.Crates)),
+		GlobalEvent: r.GlobalEvent,
 	}
 
 	for _, p := range r.Players {
@@ -1005,6 +1149,9 @@ func (r *Room) sendStateToAll() {
 	}
 	for _, g := range r.Gems {
 		state.Gems = append(state.Gems, g)
+	}
+	for _, c := range r.Crates {
+		state.Crates = append(state.Crates, c)
 	}
 
 	msg := ServerMessage{

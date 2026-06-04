@@ -55,6 +55,8 @@ type Player struct {
 	TeleportCooldown float64       `json:"-"`
 	IsBot           bool           `json:"is_bot"`
 	Hero          string         `json:"hero"`
+	Knockback     Vector2        `json:"-"`
+	HasCrown      bool           `json:"has_crown"`
 
 	// Send/Receive
 	send chan []byte
@@ -111,6 +113,13 @@ type TrapZone struct {
 	DamageRate float64 `json:"damage_rate"`
 }
 
+type Crate struct {
+	ID       string  `json:"id"`
+	Position Vector2 `json:"pos"`
+	HP       int     `json:"hp"`
+	Radius   float64 `json:"radius"`
+}
+
 // Map Dimensions
 const (
 	MapWidth  = 3000.0
@@ -133,6 +142,8 @@ type GameStateMessage struct {
 	Players     []*Player     `json:"players"`
 	Projectiles []*Projectile `json:"projectiles"`
 	Gems        []*Gem        `json:"gems"`
+	Crates      []*Crate      `json:"crates"`
+	GlobalEvent string        `json:"global_event,omitempty"`
 }
 
 type ServerMessage struct {

@@ -1076,6 +1076,23 @@ func _on_world_draw():
 		world_node.draw_arc(pos, radius - 8.0, -p_a, -p_a + TAU, 16, Color(0.6, 0.1, 1.0, 0.5), 2.0)
 		world_node.draw_circle(pos, radius*0.4, Color(0.4, 0.0, 0.8, 0.6))
 		world_node.draw_string(system_font, pos + Vector2(-30, 4), "PORTAL", HORIZONTAL_ALIGNMENT_CENTER, -1, 12, Color(0.9, 0.6, 1.0))
+	# 4.2 Draw Crates
+	var crates_list = _get_safe_array(game_state, "crates")
+	for c in crates_list:
+		if not (c is Dictionary): continue
+		var c_pos = _get_safe_vector2(c, "pos")
+		var c_rad = _get_safe_float(c, "radius", 40.0)
+		if c_pos.distance_to(cam_pos) > c_rad + 800.0: continue
+		
+		# TODO: Replace with Sprite / Texture later!
+		# For now, draw a wooden box
+		var crate_rect = Rect2(c_pos.x - c_rad, c_pos.y - c_rad, c_rad*2, c_rad*2)
+		world_node.draw_rect(crate_rect, Color(0.5, 0.3, 0.1), true) # Base wood color
+		world_node.draw_rect(crate_rect, Color(0.3, 0.15, 0.05), false, 4.0) # Dark outline
+		# Draw wooden planks cross pattern
+		world_node.draw_line(Vector2(c_pos.x - c_rad, c_pos.y - c_rad), Vector2(c_pos.x + c_rad, c_pos.y + c_rad), Color(0.3, 0.15, 0.05), 3.0)
+		world_node.draw_line(Vector2(c_pos.x + c_rad, c_pos.y - c_rad), Vector2(c_pos.x - c_rad, c_pos.y + c_rad), Color(0.3, 0.15, 0.05), 3.0)
+		world_node.draw_circle(c_pos, 6.0, Color(0.8, 0.7, 0.2)) # lock/bolt
 
 	# 5. Draw Gems (Rotating & Floating items with drop shadows)
 	var gems_list = _get_safe_array(game_state, "gems")
@@ -1402,7 +1419,25 @@ func _on_world_draw():
 				var a_offset = -time_ms * 0.003 + i * (TAU / 4.0)
 				var bubble_r = 2.0 + sin(time_ms * 0.01 + i)
 				world_node.draw_circle(p_pos + Vector2(cos(a_offset), sin(a_offset)) * (poison_r + 2.0), bubble_r, Color(0.8, 0.2, 1.0, p_alpha))
-		
+		# Draw Bounty Crown if applicable
+		if _get_safe_bool(p, "has_crown", false):
+			var crown_y = p_pos.y - base_r - 20.0
+			var crown_pts = PackedVector2Array([
+				Vector2(p_pos.x - 15, crown_y),
+				Vector2(p_pos.x - 20, crown_y - 20),
+				Vector2(p_pos.x - 8, crown_y - 10),
+				Vector2(p_pos.x, crown_y - 25),
+				Vector2(p_pos.x + 8, crown_y - 10),
+				Vector2(p_pos.x + 20, crown_y - 20),
+				Vector2(p_pos.x + 15, crown_y)
+			])
+			world_node.draw_colored_polygon(crown_pts, Color(1.0, 0.8, 0.1))
+			world_node.draw_polyline(crown_pts, Color(1.0, 1.0, 0.5), 2.0)
+			# Crown gems
+			world_node.draw_circle(Vector2(p_pos.x, crown_y - 15), 3.0, Color(1.0, 0.2, 0.2))
+			world_node.draw_circle(Vector2(p_pos.x - 10, crown_y - 12), 2.0, Color(0.2, 0.5, 1.0))
+			world_node.draw_circle(Vector2(p_pos.x + 10, crown_y - 12), 2.0, Color(0.2, 1.0, 0.5))
+
 		# Name plate and Level badge
 		var p_name = _get_safe_string(p, "name", "Archer")
 		if _get_safe_bool(p, "is_bot", false):
@@ -1425,9 +1460,30 @@ func _on_world_draw():
 	for s in hit_sparks:
 		world_node.draw_circle(s.pos, s.size, s.color)
 
-	# 11. Draw Floating Damage/XP Texts
 	for t in damage_texts:
 		world_node.draw_string(system_font, t.pos, t.text, HORIZONTAL_ALIGNMENT_CENTER, 80, 16, t.color)
+
+	# 12. Draw Global Event Warning UI
+	var global_event = _get_safe_string(game_state, "global_event", "")
+	if global_event != "":
+		# Draw a large flashing text over the screen center
+		var screen_center = cam_pos
+		var flash_alpha = 0.5 + 0.5 * sin(time_ms * 0.01)
+		var event_color = Color(1.0, 0.2, 0.2, flash_alpha)
+		if global_event == "SPEED_BOOST":
+			event_color = Color(0.2, 0.8, 1.0, flash_alpha)
+		
+		# Darkened overlay if DARKNESS
+		if global_event == "DARKNESS":
+			# Draw a giant dark circle with a hole in the middle (faux lighting)
+			# Since drawing a full screen overlay with a hole in Godot CanvasItem draw is tricky,
+			# We will draw 4 huge rectangles around the player, or just a translucent full screen
+			# Just an overlay for now to simulate darkness:
+			world_node.draw_rect(Rect2(cam_pos.x - 1500, cam_pos.y - 1500, 3000, 3000), Color(0.0, 0.0, 0.0, 0.85), true)
+			# Player vision circle
+			world_node.draw_circle(cam_pos, 250.0, Color(1.0, 1.0, 1.0, 0.1))
+
+		world_node.draw_string(system_font, screen_center + Vector2(-300, -200), "⚠️ GLOBAL EVENT: " + global_event, HORIZONTAL_ALIGNMENT_CENTER, 600, 32, event_color)
 
 func _draw_entity_health_bar(canvas: Node2D, pos: Vector2, hp: float, max_hp: float, width: int, height: int, alpha: float = 1.0):
 	var half_w = width / 2.0
