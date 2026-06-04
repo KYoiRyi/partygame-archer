@@ -94,6 +94,7 @@ jobs:
       - name: Export APK
         run: |
           mkdir -p dist
+          ./godot --headless --path client --editor --quit || true
           ./godot --headless --path client --export-debug "Android" ../dist/archer.apk
 
 
