@@ -73,6 +73,7 @@ var smooth_positions: Dictionary = {}
 var proj_trails: Dictionary = {}
 var status_label: Label = null
 var client_dash_cooldown: float = 0.0
+var last_touch_time: int = 0
 
 func _ready():
 	system_font = ThemeDB.fallback_font
@@ -192,7 +193,12 @@ func _input(event: InputEvent):
 				joystick_draw_node.queue_redraw()
 		return
 		
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		last_touch_time = Time.get_ticks_msec()
+		
 	if event is InputEventMouseButton:
+		if Time.get_ticks_msec() - last_touch_time < 100:
+			return # Ignore emulated mouse click from touch
 		if event.button_index == MOUSE_BUTTON_LEFT and not is_chatting:
 			if event.pressed:
 				mouse_aim_active = true
@@ -207,6 +213,8 @@ func _input(event: InputEvent):
 					mouse_aim_active = false
 					if joystick_draw_node: joystick_draw_node.queue_redraw()
 	elif event is InputEventMouseMotion:
+		if Time.get_ticks_msec() - last_touch_time < 100:
+			return # Ignore emulated mouse motion from touch
 		if mouse_aim_active:
 			if joystick_draw_node: joystick_draw_node.queue_redraw()
 
