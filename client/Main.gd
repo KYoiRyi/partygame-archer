@@ -482,9 +482,8 @@ func _process(delta):
 	
 	# 3. Process Input (If connected and not chatting)
 	if is_connected and not is_chatting and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
-		if OS.has_focus():
-			_process_movement_input(delta)
-			_send_movement_if_changed()
+		_process_movement_input(delta)
+		_send_movement_if_changed()
 		
 	# 4. Handle Chat Open key (Enter)
 	if Input.is_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_ENTER):
@@ -492,7 +491,7 @@ func _process(delta):
 			$UI/HUD/ChatBox/ChatInput.grab_focus()
 			is_chatting = true
 			
-	# Process Dash Keyboard Input & Cooldown UI
+	# Process Cooldowns
 	if client_dash_cooldown > 0:
 		client_dash_cooldown -= delta
 		var db = $UI/HUD.get_node_or_null("DashButton")
@@ -504,6 +503,9 @@ func _process(delta):
 		if db:
 			db.text = "⚡ DASH"
 			db.disabled = false
+			
+	if client_shoot_cooldown > 0:
+		client_shoot_cooldown -= delta
 			
 	if not is_chatting and (Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_SHIFT)):
 		_on_dash_pressed()
@@ -552,9 +554,6 @@ func _send_movement_if_changed():
 			}
 			socket.send_text(JSON.stringify(msg))
 
-	if client_shoot_cooldown > 0:
-		client_shoot_cooldown -= delta
-		
 func _trigger_aim_shoot(angle: float):
 	if client_shoot_cooldown <= 0:
 		var msg = {
