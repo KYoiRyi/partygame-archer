@@ -32,6 +32,7 @@ var last_move_send_time: int = 0
 var current_input_dir: Vector2 = Vector2.ZERO
 var current_input_angle: float = 0.0
 var is_chatting: bool = false
+var mouse_aim_active: bool = false
 
 # --- Virtual Touchscreen Controls ---
 var joystick_active: bool = false
@@ -181,14 +182,33 @@ func _on_dash_pressed():
 func _input(event: InputEvent):
 	if not is_connected or not (my_player_data is Dictionary) or _get_safe_bool(my_player_data, "dead", false):
 		# Cleanup if we disconnected or died
-		if joystick_active or aim_active:
+		if joystick_active or aim_active or mouse_aim_active:
 			joystick_active = false
 			joystick_touch_index = -1
 			aim_active = false
 			aim_touch_index = -1
+			mouse_aim_active = false
 			if joystick_draw_node:
 				joystick_draw_node.queue_redraw()
 		return
+		
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and not is_chatting:
+			if event.pressed:
+				mouse_aim_active = true
+				if joystick_draw_node: joystick_draw_node.queue_redraw()
+			else:
+				if mouse_aim_active:
+					var mouse_pos = get_global_mouse_position()
+					if my_player_data is Dictionary:
+						var p_pos = _get_safe_vector2(my_player_data, "pos")
+						var aim_angle = (mouse_pos - p_pos).angle()
+						_trigger_aim_shoot(aim_angle)
+					mouse_aim_active = false
+					if joystick_draw_node: joystick_draw_node.queue_redraw()
+	elif event is InputEventMouseMotion:
+		if mouse_aim_active:
+			if joystick_draw_node: joystick_draw_node.queue_redraw()
 
 	if event is InputEventScreenTouch:
 		if event.pressed:
@@ -223,6 +243,8 @@ func _input(event: InputEvent):
 				var drag_offset = aim_pos - aim_center
 				if drag_offset.length() < 18.0:
 					_trigger_quick_tap_shoot()
+				else:
+					_trigger_aim_shoot(drag_offset.angle())
 				aim_active = false
 				aim_touch_index = -1
 				if joystick_draw_node:
@@ -276,26 +298,24 @@ func _on_joystick_draw():
 		joystick_draw_node.draw_arc(aim_center, JOYSTICK_MAX_DRAG - 2, 0.0, TAU, 36, Color(1.0, 0.3, 0.3, 0.1), 1.0)
 		joystick_draw_node.draw_circle(aim_center, 6.0, Color(1.0, 0.3, 0.3, 0.5))
 		
-		# Draw floating aim handle (red glow)
+		# Target reticle
 		joystick_draw_node.draw_circle(aim_pos, 28.0, Color(1.0, 0.3, 0.3, 0.25))
 		joystick_draw_node.draw_circle(aim_pos, 24.0, Color(1.0, 0.3, 0.3, 0.75))
 		joystick_draw_node.draw_arc(aim_pos, 24.0, 0.0, TAU, 24, Color.WHITE, 2.0)
 		
-		# Draw line representing the direction of shoot
-		var offset = aim_pos - aim_center
-		if offset.length() > 15.0:
-			var dir = offset.normalized()
-			var line_end = aim_center + dir * (JOYSTICK_MAX_DRAG - 5.0)
-			# Draw indicator arrow line
-			joystick_draw_node.draw_line(aim_center, line_end, Color(1.0, 0.3, 0.3, 0.8), 4.0)
-			# Draw arrow head
-			var arrow_angle = dir.angle()
-			var arrow_pts = PackedVector2Array([
-				line_end,
-				line_end + Vector2(cos(arrow_angle + 2.4), sin(arrow_angle + 2.4)) * 12,
-				line_end + Vector2(cos(arrow_angle - 2.4), sin(arrow_angle - 2.4)) * 12
-			])
-			joystick_draw_node.draw_colored_polygon(arrow_pts, Color(1.0, 0.3, 0.3, 0.9))
+		# Draw aiming line in game world overlay if player data exists
+		if my_player_data is Dictionary:
+			var p_pos = _get_safe_vector2(my_player_data, "pos")
+			var angle = (aim_pos - aim_center).angle()
+			var line_end = p_pos + Vector2(cos(angle), sin(angle)) * 400.0
+			joystick_draw_node.draw_line(p_pos, line_end, Color(1.0, 0.3, 0.3, 0.4), 2.0)
+			
+	if mouse_aim_active and not aim_active and my_player_data is Dictionary:
+		var p_pos = _get_safe_vector2(my_player_data, "pos")
+		var mouse_pos = get_global_mouse_position()
+		var angle = (mouse_pos - p_pos).angle()
+		var line_end = p_pos + Vector2(cos(angle), sin(angle)) * 400.0
+		joystick_draw_node.draw_line(p_pos, line_end, Color(1.0, 0.3, 0.3, 0.4), 2.0)
 
 func _on_name_input_focus_entered():
 	if OS.has_feature("web"):
@@ -462,9 +482,9 @@ func _process(delta):
 	
 	# 3. Process Input (If connected and not chatting)
 	if is_connected and not is_chatting and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
-		_process_movement_input(delta)
-		_process_aiming_input(delta)
-		_send_movement_if_changed()
+		if OS.has_focus():
+			_process_movement_input(delta)
+			_send_movement_if_changed()
 		
 	# 4. Handle Chat Open key (Enter)
 	if Input.is_key_pressed(KEY_ENTER) or Input.is_physical_key_pressed(KEY_ENTER):
@@ -532,50 +552,33 @@ func _send_movement_if_changed():
 			}
 			socket.send_text(JSON.stringify(msg))
 
-func _process_aiming_input(delta):
 	if client_shoot_cooldown > 0:
 		client_shoot_cooldown -= delta
+		
+func _trigger_aim_shoot(angle: float):
+	if client_shoot_cooldown <= 0:
+		var msg = {
+			"type": "shoot",
+			"angle": angle
+		}
+		socket.send_text(JSON.stringify(msg))
+		_apply_shoot_cooldown()
 
-	var want_shoot = false
-	var shoot_angle = 0.0
-
-	if aim_active:
-		# Mobile touch aiming
-		var offset = aim_pos - aim_center
-		if offset.length() > 15.0:
-			want_shoot = true
-			shoot_angle = offset.angle()
-	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and not is_chatting:
-		# Desktop mouse aiming
-		var mouse_pos = get_global_mouse_position()
-		if my_player_data is Dictionary:
-			var p_pos = _get_safe_vector2(my_player_data, "pos")
-			want_shoot = true
-			shoot_angle = (mouse_pos - p_pos).angle()
-
-	if want_shoot:
-		if client_shoot_cooldown <= 0:
-			var msg = {
-				"type": "shoot",
-				"angle": shoot_angle
-			}
-			socket.send_text(JSON.stringify(msg))
-			
-			# Calculate cooldown locally to match server base classes
-			var base_cd = 0.25
-			var hero = _get_safe_string(my_player_data, "hero", "ranger")
-			if hero == "knight":
-				base_cd = 0.40
-			elif hero == "mage":
-				base_cd = 0.35
-			
-			var atk_speed_lvl = 0
-			if my_player_data is Dictionary:
-				var skills = my_player_data.get("skills", {})
-				if skills is Dictionary:
-					atk_speed_lvl = skills.get("atk_speed", 0)
-			
-			client_shoot_cooldown = base_cd * pow(0.85, atk_speed_lvl) - 0.02 # 20ms margin
+func _apply_shoot_cooldown():
+	var base_cd = 0.25
+	var hero = _get_safe_string(my_player_data, "hero", "ranger")
+	if hero == "knight":
+		base_cd = 0.40
+	elif hero == "mage":
+		base_cd = 0.35
+	
+	var atk_speed_lvl = 0
+	if my_player_data is Dictionary:
+		var skills = my_player_data.get("skills", {})
+		if skills is Dictionary:
+			atk_speed_lvl = skills.get("atk_speed", 0)
+	
+	client_shoot_cooldown = base_cd * pow(0.85, atk_speed_lvl) - 0.02
 
 func _trigger_quick_tap_shoot():
 	# Find nearest enemy in range and fire
@@ -626,19 +629,7 @@ func _trigger_quick_tap_shoot():
 				"angle": shoot_angle
 			}
 			socket.send_text(JSON.stringify(msg))
-			
-			# Trigger local cooldown
-			var base_cd = 0.25
-			var hero = _get_safe_string(my_player_data, "hero", "ranger")
-			if hero == "knight":
-				base_cd = 0.40
-			elif hero == "mage":
-				base_cd = 0.35
-			var atk_speed_lvl = 0
-			var skills = my_player_data.get("skills", {})
-			if skills is Dictionary:
-				atk_speed_lvl = skills.get("atk_speed", 0)
-			client_shoot_cooldown = base_cd * pow(0.85, atk_speed_lvl) - 0.02
+			_apply_shoot_cooldown()
 
 func _update_visual_effects(delta):
 	# Update damage texts
@@ -1126,10 +1117,9 @@ func _on_world_draw():
 		if trail_pts.size() > 1:
 			var pts_array = PackedVector2Array(trail_pts)
 			
-			# Glow layers for plasma trail
-			world_node.draw_polyline(pts_array, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.1), 16.0)
-			world_node.draw_polyline(pts_array, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.35), 8.0)
-			world_node.draw_polyline(pts_array, Color(1.0, 1.0, 1.0, 0.8), 2.5)
+		# Glow layers for plasma trail (toned down to reduce visual clutter)
+			world_node.draw_polyline(pts_array, Color(arrow_color.r, arrow_color.g, arrow_color.b, 0.3), 4.0)
+			world_node.draw_polyline(pts_array, Color(1.0, 1.0, 1.0, 0.8), 1.5)
 			
 		# --- PROJECTILE HEAD ANIMATION ---
 		var head_angle = vel.angle()
