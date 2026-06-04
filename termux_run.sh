@@ -60,18 +60,18 @@ if [ "$IS_TERMUX" = true ]; then
     echo -e "${BLUE}[*] Setting up PostgreSQL users and database...${NC}"
     if pg_isready &>/dev/null; then
         # Check if role postgres exists
-        role_exists=$(psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='postgres'")
+        role_exists=$(psql -d template1 -tAc "SELECT 1 FROM pg_roles WHERE rolname='postgres'")
         if [ "$role_exists" != "1" ]; then
             createuser -s postgres || true
         fi
         
         # Set postgres user password to postgres
-        psql -d postgres -c "ALTER USER postgres WITH PASSWORD 'postgres';" || true
+        psql -d template1 -c "ALTER USER postgres WITH PASSWORD 'postgres';" || true
         
         # Create partygame database if not exists
-        db_exists=$(psql -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='partygame'")
+        db_exists=$(psql -d template1 -tAc "SELECT 1 FROM pg_database WHERE datname='partygame'")
         if [ "$db_exists" != "1" ]; then
-            psql -U postgres -d postgres -c "CREATE DATABASE partygame;" || true
+            psql -d template1 -c "CREATE DATABASE partygame;" || true
         fi
         echo -e "${GREEN}[✔] PostgreSQL configured successfully.${NC}"
     else

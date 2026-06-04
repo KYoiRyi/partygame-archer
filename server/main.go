@@ -45,7 +45,7 @@ func getSelfSignedTLSConfig() (*tls.Config, error) {
 }
 
 func main() {
-	port := flag.String("port", "8080", "HTTP service port")
+	port := flag.String("port", "8090", "HTTP service port")
 	ssl := flag.Bool("ssl", false, "Use self-signed SSL/TLS for secure contexts (HTTPS) in LAN")
 	flag.Parse()
 

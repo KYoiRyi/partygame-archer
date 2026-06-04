@@ -87,7 +87,7 @@ var selected_room_id: String = ""
 
 # Server Configuration
 var server_host: String = "localhost"
-var server_port: String = "8080"
+var server_port: String = "8090"
 
 # UI Panels
 var server_panel: Control
@@ -112,7 +112,7 @@ func _load_token() -> Dictionary:
 			var host = f.get_line().strip_edges()
 			var port = f.get_line().strip_edges()
 			if host == "": host = "localhost"
-			if port == "": port = "8080"
+			if port == "": port = "8090"
 			return {"token": token, "username": username, "host": host, "port": port}
 	return {}
 
@@ -426,6 +426,10 @@ func _create_lobby_ui():
 	srv_box.set_anchors_preset(Control.PRESET_CENTER)
 	srv_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	srv_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	srv_box.offset_left = -210
+	srv_box.offset_right = 210
+	srv_box.offset_top = -160
+	srv_box.offset_bottom = 160
 	srv_box.add_theme_stylebox_override("panel", box_style)
 	
 	var svbox = VBoxContainer.new()
@@ -457,7 +461,7 @@ func _create_lobby_ui():
 	
 	var port_input = LineEdit.new()
 	port_input.name = "PortInput"
-	port_input.placeholder_text = "Port (e.g. 8080)..."
+	port_input.placeholder_text = "Port (e.g. 8090)..."
 	port_input.text = server_port
 	port_input.custom_minimum_size = Vector2(300, 36)
 	port_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -496,6 +500,10 @@ func _create_lobby_ui():
 	auth_box.set_anchors_preset(Control.PRESET_CENTER)
 	auth_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	auth_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	auth_box.offset_left = -200
+	auth_box.offset_right = 200
+	auth_box.offset_top = -190
+	auth_box.offset_bottom = 190
 	auth_box.add_theme_stylebox_override("panel", box_style)
 	
 	var avbox = VBoxContainer.new()
@@ -584,6 +592,10 @@ func _create_lobby_ui():
 	menu_box.set_anchors_preset(Control.PRESET_CENTER)
 	menu_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	menu_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	menu_box.offset_left = -310
+	menu_box.offset_right = 310
+	menu_box.offset_top = -260
+	menu_box.offset_bottom = 260
 	menu_box.add_theme_stylebox_override("panel", box_style)
 	
 	var mvbox = VBoxContainer.new()
@@ -685,6 +697,10 @@ func _create_lobby_ui():
 	r_box.set_anchors_preset(Control.PRESET_CENTER)
 	r_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	r_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	r_box.offset_left = -250
+	r_box.offset_right = 250
+	r_box.offset_top = -225
+	r_box.offset_bottom = 225
 	r_box.add_theme_stylebox_override("panel", box_style)
 	
 	var rvbox = VBoxContainer.new()
