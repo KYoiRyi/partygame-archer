@@ -868,7 +868,16 @@ func _on_connect_server_pressed(host: String, port: String):
 	if host == "" or port == "":
 		_show_server_error("Host and Port cannot be empty!")
 		return
-		
+	if OS.has_feature("web"):
+		var web_proto = JavaScriptBridge.eval("window.location.protocol")
+		if web_proto == "https:":
+			var host_lower = host.to_lower()
+			var is_local = host_lower == "localhost" or host_lower == "127.0.0.1" or host_lower.begins_with("192.168.") or host_lower.begins_with("10.") or host_lower.begins_with("172.")
+			if is_local:
+				_show_server_error("Mixed Content Blocked!\nBrowsers block HTTP LAN requests from HTTPS pages.\nOpen http://" + host + ":" + port + "/ directly to play!")
+				JavaScriptBridge.eval("alert('浏览器安全限制：HTTPS 网页无法连接局域网 HTTP 服务器。请直接在浏览器地址栏打开 http://" + host + ":" + port + "/ 进行联机！')")
+				return
+
 	server_host = host
 	server_port = port
 	

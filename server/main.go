@@ -62,12 +62,9 @@ func main() {
 		ServeWs(hub, w, r)
 	})
 
-	// 2. Static file serving with SharedArrayBuffer Headers (COOP / COEP)
-	// These headers are mandatory for Godot 4.x exported Web Assembly to load
+	// 2. Static file serving (Headers optimized for single-threaded or LAN WebAssembly loading)
 	fileServer := http.FileServer(http.Dir("./dist"))
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
-		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
 		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
