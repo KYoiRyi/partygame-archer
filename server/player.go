@@ -108,31 +108,59 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Parse player details from query params
+	token := r.URL.Query().Get("token")
 	name := r.URL.Query().Get("name")
+	heroCode := r.URL.Query().Get("hero")
+	roomID := r.URL.Query().Get("room_id")
+
+	// Resolve name and accountID from token
+	accountID := -1
+	if token != "" {
+		if id, ok := GetAccountIDFromToken(token); ok {
+			accountID = id
+			if uname, ok2 := tokenStore.usernames[token]; ok2 && name == "" {
+				name = uname
+			}
+		}
+	}
 	if name == "" {
 		name = "Archer"
 	}
-	
-	heroCode := r.URL.Query().Get("hero")
+
+	// Map heroCode string to hero class name
 	heroClass := "ranger"
-	if heroCode == "1" {
+	switch heroCode {
+	case "1":
 		heroClass = "knight"
-	} else if heroCode == "2" {
+	case "2":
 		heroClass = "mage"
+	case "3":
+		heroClass = "assassin"
+	case "4":
+		heroClass = "sniper"
 	}
 
 	playerID := fmt.Sprintf("player_%d", time.Now().UnixNano())
 
 	p := &Player{
-		ID:       playerID,
-		Name:     name,
-		send:     make(chan []byte, 256),
-		conn:     conn,
-		Hero:     heroClass,
+		ID:        playerID,
+		Name:      name,
+		send:      make(chan []byte, 256),
+		conn:      conn,
+		Hero:      heroClass,
+		AccountID: accountID,
 	}
 
-	// 2. Fetch or create a game room
-	room := hub.GetAvailableRoom()
+	// 2. Fetch or join a game room
+	var room *Room
+	if roomID != "" {
+		hub.mu.Lock()
+		room = hub.rooms[roomID]
+		hub.mu.Unlock()
+	}
+	if room == nil {
+		room = hub.GetAvailableRoom()
+	}
 	p.room = room
 
 	room.RegisterPlayer(p)

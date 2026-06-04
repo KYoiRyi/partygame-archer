@@ -992,6 +992,7 @@ func (r *Room) damagePlayer(p *Player, dmg float64, attackerID string) {
 		if att, ok := r.Players[attackerID]; ok {
 			attackerName = att.Name
 			att.Score += 100
+			att.Kills++
 			
 			// Level up boost for killing a player
 			att.XP += 100
@@ -1002,6 +1003,11 @@ func (r *Room) damagePlayer(p *Player, dmg float64, attackerID string) {
 				att.MaxHP += 10.0
 				att.HP = att.MaxHP
 				r.triggerLevelUp(att)
+			}
+
+			// End game if score reaches 500 (5 kills)
+			if att.Score >= 500 {
+				r.endGame(att.Name)
 			}
 		}
 		
@@ -1092,6 +1098,14 @@ func (r *Room) endGame(winner string) {
 	if data, err := json.Marshal(msg); err == nil {
 		r.broadcast(data)
 	}
+
+	// Save session stats for logged-in accounts
+	for _, p := range r.Players {
+		if !p.IsBot && p.AccountID > 0 {
+			won := (p.Name == winner)
+			SaveSessionStats(p.AccountID, p.Hero, p.Kills, p.Score, won)
+		}
+	}
 	
 	// Reset Map after 10 seconds delay
 	go func() {
@@ -1113,6 +1127,7 @@ func (r *Room) endGame(winner string) {
 			p.HP = 100
 			p.Speed = 280.0
 			p.Score = 0
+			p.Kills = 0
 			r.respawnPlayer(p)
 		}
 		r.broadcastChat("system", "A new match has started! Go fight!")

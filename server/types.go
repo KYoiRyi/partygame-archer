@@ -38,6 +38,7 @@ type Player struct {
 	XP            int            `json:"xp"`
 	XPToNext      int            `json:"xp_to_next"`
 	Score         int            `json:"score"`
+	Kills         int            `json:"kills"`
 	Skills        map[string]int `json:"skills"` // SkillName -> current level (up to 5)
 	Dead          bool           `json:"dead"`
 	RespawnTimer  float64        `json:"respawn_timer"`
@@ -55,6 +56,7 @@ type Player struct {
 	TeleportCooldown float64       `json:"-"`
 	IsBot           bool           `json:"is_bot"`
 	Hero          string         `json:"hero"`
+	AccountID     int            `json:"-"` // DB account ID, -1 = guest
 	Knockback     Vector2        `json:"-"`
 	HasCrown      bool           `json:"has_crown"`
 

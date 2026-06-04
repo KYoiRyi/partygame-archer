@@ -8,3 +8,5 @@ game_server
 # Ignore Godot import cache
 client/.godot/
 Archer-MOBA-Android-APK/
+server/partygame-server
+server/server.log

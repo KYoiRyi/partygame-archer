@@ -51,6 +51,12 @@ func main() {
 
 	hub := NewHub()
 
+	// Initialize database (graceful if unavailable)
+	InitDB()
+
+	// Register REST API routes (auth, rooms, profile)
+	RegisterAPIRoutes(hub)
+
 	// 1. WebSocket endpoint for game logic
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ServeWs(hub, w, r)

@@ -78,43 +78,43 @@ var status_label: Label = null
 var client_dash_cooldown: float = 0.0
 var last_touch_time: int = 0
 
+# --- Account & Room Management State ---
+var auth_token: String = ""
+var auth_username: String = ""
+var is_guest: bool = true
+var user_stats: Dictionary = {"kills": 0, "wins": 0, "played": 0}
+var http_node: HTTPRequest
+var selected_room_id: String = ""
+var login_panel: Control
+var menu_panel: Control
+
+func _save_token(token: String, username: String):
+	var f = FileAccess.open("user://auth_token.txt", FileAccess.WRITE)
+	if f:
+		f.store_string(token + "\n" + username)
+
+func _load_token() -> Dictionary:
+	if FileAccess.file_exists("user://auth_token.txt"):
+		var f = FileAccess.open("user://auth_token.txt", FileAccess.READ)
+		if f:
+			var token = f.get_line().strip_edges()
+			var username = f.get_line().strip_edges()
+			return {"token": token, "username": username}
+	return {}
+
 func _ready():
 	system_font = ThemeDB.fallback_font
 	
-	# Show ServerInput on non-web platforms (like APK/Desktop) so users can edit the server URL,
-	# but hide it on Web since it resolves automatically.
-	if OS.has_feature("web"):
-		$UI/Lobby/Panel/VBox/ServerInput.visible = false
-	else:
-		$UI/Lobby/Panel/VBox/ServerInput.visible = true
-		$UI/Lobby/Panel/VBox/ServerInput.text = ""
-		$UI/Lobby/Panel/VBox/ServerInput.placeholder_text = "wss://prts.kyoiryi.top/archer/ws (Default)"
-		
-	# Programmatic Status Label for Connection Status & Warnings
-	status_label = Label.new()
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3)) # light red
-	status_label.add_theme_font_size_override("font_size", 13)
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	$UI/Lobby/Panel/VBox.add_child(status_label)
+	# Create HTTPRequest node
+	http_node = HTTPRequest.new()
+	add_child(http_node)
+	http_node.request_completed.connect(_on_http_request_completed)
 	
-	# Dynamic OptionButton for Hero Selection
-	hero_select_btn = OptionButton.new()
-	hero_select_btn.add_item("🏹 Ranger (Multi Shot Lvl 1, Speed 300)", 0)
-	hero_select_btn.add_item("🛡️ Knight (HP Boost Lvl 1, HP 150)", 1)
-	hero_select_btn.add_item("🔥 Mage (Fire Arrow Lvl 1, Speed 260)", 2)
-	hero_select_btn.add_item("🗡️ Assassin (Poison Arrow, Speed 330)", 3)
-	hero_select_btn.add_item("👁️ Sniper (Piercing, Damage Boost, Slow Atk)", 4)
-	hero_select_btn.selected = 0
-	$UI/Lobby/Panel/VBox.add_child(hero_select_btn)
-	$UI/Lobby/Panel/VBox.move_child(hero_select_btn, $UI/Lobby/Panel/VBox.get_child_count() - 2)
+	# Dynamically build Lobby UI
+	_create_lobby_ui()
 	
-	# 1. Connect UI Signals
-	$UI/Lobby/Panel/VBox/JoinButton.pressed.connect(_on_join_pressed)
+	# Connect HUD signals
 	$UI/HUD/ChatBox/ChatInput.text_submitted.connect(_on_chat_submitted)
-	
-	# Connect name input focus_entered for mobile virtual keyboard trigger
-	$UI/Lobby/Panel/VBox/NameInput.focus_entered.connect(_on_name_input_focus_entered)
 	
 	# Connect skill choices buttons
 	$UI/SkillPanel/VBox/Choices/Choice1.pressed.connect(func(): _on_skill_chosen(0))
@@ -189,6 +189,43 @@ func _ready():
 	
 	# Force 60 FPS to fix stuttering
 	Engine.max_fps = 60
+	
+	# Attempt Auto-Login if saved token exists
+	var saved = _load_token()
+	if saved.has("token") and saved.has("username"):
+		auth_token = saved["token"]
+		auth_username = saved["username"]
+		
+		# Validate token & fetch profile stats
+		var api_base = _get_http_api_base()
+		var url = api_base + "/api/profile?token=" + auth_token.uri_encode()
+		
+		var auto_http = HTTPRequest.new()
+		add_child(auto_http)
+		auto_http.request_completed.connect(func(res, code, hdrs, bdy):
+			if res == HTTPRequest.RESULT_SUCCESS and code == 200:
+				var data_str = bdy.get_string_from_utf8()
+				var data = JSON.parse_string(data_str)
+				if data is Dictionary and data.get("ok") == true:
+					is_guest = false
+					user_stats = {
+						"kills": int(data.get("total_kills", 0)),
+						"wins": int(data.get("total_wins", 0)),
+						"played": int(data.get("games_played", 0))
+					}
+					var hero = data.get("hero", "ranger")
+					var hero_idx = 0
+					match hero:
+						"knight": hero_idx = 1
+						"mage": hero_idx = 2
+						"assassin": hero_idx = 3
+						"sniper": hero_idx = 4
+					if hero_select_btn:
+						hero_select_btn.selected = hero_idx
+					_show_menu_panel()
+			auto_http.queue_free()
+		)
+		auto_http.request(url, [], HTTPClient.METHOD_GET)
 
 func _on_dash_pressed():
 	if client_dash_cooldown <= 0 and is_connected and (my_player_data is Dictionary) and not _get_safe_bool(my_player_data, "dead", false):
@@ -349,83 +386,518 @@ func _on_joystick_draw():
 		var line_end = p_pos + Vector2(cos(angle), sin(angle)) * 400.0
 		joystick_draw_node.draw_line(p_pos, line_end, Color(1.0, 0.3, 0.3, 0.4), 2.0)
 
-func _on_name_input_focus_entered():
-	if OS.has_feature("web"):
-		# Release focus immediately to avoid repeating prompt triggers
-		$UI/Lobby/Panel/VBox/NameInput.release_focus()
-		var current_text = $UI/Lobby/Panel/VBox/NameInput.text
-		var input = JavaScriptBridge.eval("prompt('请输入你的游戏昵称 (Enter your nickname):', '" + current_text.replace("'", "\\'") + "')")
-		if input != null:
-			var name_str = str(input).strip_edges()
-			if name_str != "":
-				$UI/Lobby/Panel/VBox/NameInput.text = name_str
+func _create_lobby_ui():
+	# Hide the default panel
+	if has_node("UI/Lobby/Panel"):
+		$UI/Lobby/Panel.visible = false
+		
+	# Create Custom BG Flat style
+	var bg_panel = Panel.new()
+	bg_panel.name = "CustomBG"
+	bg_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var bg_style = StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.04, 0.05, 0.08, 0.96)
+	bg_panel.add_theme_stylebox_override("panel", bg_style)
+	$UI/Lobby.add_child(bg_panel)
+
+	# Box Style
+	var box_style = StyleBoxFlat.new()
+	box_style.bg_color = Color(0.08, 0.12, 0.18, 0.85)
+	box_style.border_width_left = 2
+	box_style.border_width_top = 2
+	box_style.border_width_right = 2
+	box_style.border_width_bottom = 2
+	box_style.border_color = Color(0.15, 0.6, 1.0, 0.7) # Glowing cyan
+	box_style.corner_radius_top_left = 16
+	box_style.corner_radius_top_right = 16
+	box_style.corner_radius_bottom_left = 16
+	box_style.corner_radius_bottom_right = 16
+	box_style.shadow_color = Color(0.0, 0.5, 1.0, 0.2)
+	box_style.shadow_size = 12
+	
+	# 1. Login Panel
+	login_panel = Control.new()
+	login_panel.name = "AccountPanel"
+	login_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	$UI/Lobby.add_child(login_panel)
+	
+	var login_box = PanelContainer.new()
+	login_box.custom_minimum_size = Vector2(400, 380)
+	login_box.set_anchors_preset(Control.PRESET_CENTER)
+	login_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	login_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	login_box.add_theme_stylebox_override("panel", box_style)
+	login_panel.add_child(login_box)
+	
+	var vbox = VBoxContainer.new()
+	vbox.name = "VBoxContainer"
+	vbox.add_theme_constant_override("separation", 15)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	login_box.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "⚔️ ARCHER PARTY 🏹"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
+	vbox.add_child(title)
+	
+	var desc = Label.new()
+	desc.text = "Track your score, wins & kills in real-time"
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.add_theme_font_size_override("font_size", 12)
+	desc.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	vbox.add_child(desc)
+	
+	var user_input = LineEdit.new()
+	user_input.name = "UsernameInput"
+	user_input.placeholder_text = "Enter Username..."
+	user_input.custom_minimum_size = Vector2(300, 36)
+	user_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(user_input)
+	
+	var pass_input = LineEdit.new()
+	pass_input.name = "PasswordInput"
+	pass_input.placeholder_text = "Enter Password..."
+	pass_input.secret = true
+	pass_input.custom_minimum_size = Vector2(300, 36)
+	pass_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(pass_input)
+	
+	var err_label = Label.new()
+	err_label.name = "ErrorLabel"
+	err_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	err_label.add_theme_font_size_override("font_size", 12)
+	err_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+	err_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vbox.add_child(err_label)
+	
+	var btn_hbox = HBoxContainer.new()
+	btn_hbox.add_theme_constant_override("separation", 15)
+	btn_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(btn_hbox)
+	
+	var login_btn = Button.new()
+	login_btn.text = "LOG IN"
+	login_btn.custom_minimum_size = Vector2(120, 36)
+	login_btn.pressed.connect(func(): _on_auth_pressed(user_input.text, pass_input.text, false))
+	btn_hbox.add_child(login_btn)
+	
+	var reg_btn = Button.new()
+	reg_btn.text = "REGISTER"
+	reg_btn.custom_minimum_size = Vector2(120, 36)
+	reg_btn.pressed.connect(func(): _on_auth_pressed(user_input.text, pass_input.text, true))
+	btn_hbox.add_child(reg_btn)
+	
+	var divider = Label.new()
+	divider.text = "— OR —"
+	divider.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	divider.add_theme_font_size_override("font_size", 11)
+	divider.add_theme_color_override("font_color", Color(0.4, 0.5, 0.6))
+	vbox.add_child(divider)
+	
+	var guest_btn = Button.new()
+	guest_btn.text = "PLAY AS GUEST 👤"
+	guest_btn.custom_minimum_size = Vector2(250, 36)
+	guest_btn.pressed.connect(_on_guest_pressed)
+	vbox.add_child(guest_btn)
+	
+	# 2. Main Menu Panel (Room Management)
+	menu_panel = Control.new()
+	menu_panel.name = "MenuPanel"
+	menu_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_panel.visible = false
+	$UI/Lobby.add_child(menu_panel)
+	
+	var menu_box = PanelContainer.new()
+	menu_box.name = "PanelContainer"
+	menu_box.custom_minimum_size = Vector2(620, 520)
+	menu_box.set_anchors_preset(Control.PRESET_CENTER)
+	menu_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	menu_box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	menu_box.add_theme_stylebox_override("panel", box_style)
+	menu_panel.add_child(menu_box)
+	
+	var mvbox = VBoxContainer.new()
+	mvbox.name = "VBoxContainer"
+	mvbox.add_theme_constant_override("separation", 15)
+	mvbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu_box.add_child(mvbox)
+	
+	var profile_label = Label.new()
+	profile_label.name = "ProfileLabel"
+	profile_label.text = "Welcome, Archer!"
+	profile_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	profile_label.add_theme_font_size_override("font_size", 20)
+	profile_label.add_theme_color_override("font_color", Color(0.3, 0.85, 1.0))
+	mvbox.add_child(profile_label)
+	
+	var stats_label_node = Label.new()
+	stats_label_node.name = "StatsLabel"
+	stats_label_node.text = "Kills: 0  |  Wins: 0  |  Played: 0"
+	stats_label_node.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stats_label_node.add_theme_font_size_override("font_size", 14)
+	stats_label_node.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
+	mvbox.add_child(stats_label_node)
+	
+	var config_hbox = HBoxContainer.new()
+	config_hbox.name = "HBoxContainer"
+	config_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	config_hbox.add_theme_constant_override("separation", 12)
+	mvbox.add_child(config_hbox)
+	
+	var hero_lbl = Label.new()
+	hero_lbl.text = "Hero Class:"
+	hero_lbl.add_theme_font_size_override("font_size", 13)
+	config_hbox.add_child(hero_lbl)
+	
+	hero_select_btn = OptionButton.new()
+	hero_select_btn.add_item("🏹 Ranger (Speed 300)", 0)
+	hero_select_btn.add_item("🛡️ Knight (HP 150)", 1)
+	hero_select_btn.add_item("🔥 Mage (Speed 260)", 2)
+	hero_select_btn.add_item("🗡️ Assassin (Speed 330)", 3)
+	hero_select_btn.add_item("👁️ Sniper (High Damage)", 4)
+	hero_select_btn.selected = 0
+	hero_select_btn.item_selected.connect(_on_hero_class_selected)
+	config_hbox.add_child(hero_select_btn)
+	
+	var srv_lbl = Label.new()
+	srv_lbl.text = "Server:"
+	srv_lbl.add_theme_font_size_override("font_size", 13)
+	config_hbox.add_child(srv_lbl)
+	
+	var srv_input = LineEdit.new()
+	srv_input.name = "ServerInput"
+	srv_input.text = "ws://localhost:8080/ws"
+	srv_input.custom_minimum_size = Vector2(200, 30)
+	config_hbox.add_child(srv_input)
+	
+	var room_title = Label.new()
+	room_title.text = "🏠 ACTIVE GAME ROOMS (4-PLAYER MATCHES):"
+	room_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	room_title.add_theme_font_size_override("font_size", 13)
+	room_title.add_theme_color_override("font_color", Color(0.5, 0.7, 0.9))
+	mvbox.add_child(room_title)
+	
+	var scroll = ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(500, 160)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	mvbox.add_child(scroll)
+	
+	var room_list_box = VBoxContainer.new()
+	room_list_box.name = "RoomList"
+	scroll.add_child(room_list_box)
+	
+	var room_actions = HBoxContainer.new()
+	room_actions.alignment = BoxContainer.ALIGNMENT_CENTER
+	room_actions.add_theme_constant_override("separation", 15)
+	mvbox.add_child(room_actions)
+	
+	var create_btn = Button.new()
+	create_btn.text = "➕ CREATE ROOM"
+	create_btn.custom_minimum_size = Vector2(160, 36)
+	create_btn.pressed.connect(_on_create_room_pressed)
+	room_actions.add_child(create_btn)
+	
+	var refresh_btn = Button.new()
+	refresh_btn.text = "🔄 REFRESH"
+	refresh_btn.custom_minimum_size = Vector2(100, 36)
+	refresh_btn.pressed.connect(_refresh_room_list)
+	room_actions.add_child(refresh_btn)
+	
+	var play_anyway_btn = Button.new()
+	play_anyway_btn.name = "PlayButton"
+	play_anyway_btn.text = "🚀 PLAY (QUICK MATCH)"
+	play_anyway_btn.custom_minimum_size = Vector2(250, 40)
+	play_anyway_btn.pressed.connect(func(): _on_join_pressed())
+	mvbox.add_child(play_anyway_btn)
+	
+	var logout_btn = Button.new()
+	logout_btn.text = "🚪 LOG OUT"
+	logout_btn.custom_minimum_size = Vector2(100, 26)
+	logout_btn.pressed.connect(_on_logout_pressed)
+	mvbox.add_child(logout_btn)
+
+func _get_http_api_base() -> String:
+	var ws_url = "ws://localhost:8080/ws"
+	var srv_input = menu_panel.find_child("ServerInput") if menu_panel else null
+	if srv_input:
+		ws_url = srv_input.text.strip_edges()
+	elif has_node("UI/Lobby/Panel/VBox/ServerInput"):
+		ws_url = $UI/Lobby/Panel/VBox/ServerInput.text.strip_edges()
+		
+	if ws_url == "":
+		ws_url = "ws://localhost:8080/ws"
+		
+	var http_url = ws_url
+	if http_url.begins_with("wss://"):
+		http_url = http_url.replace("wss://", "https://")
+	elif http_url.begins_with("ws://"):
+		http_url = http_url.replace("ws://", "http://")
+		
+	if http_url.ends_with("/ws"):
+		http_url = http_url.substr(0, http_url.length() - 3)
+	elif http_url.ends_with("/"):
+		http_url = http_url.substr(0, http_url.length() - 1)
+		
+	return http_url
+
+func _on_auth_pressed(user: String, pass_word: String, register: bool):
+	user = user.strip_edges()
+	pass_word = pass_word.strip_edges()
+	
+	var err_label = login_panel.find_child("ErrorLabel")
+	if user == "" or pass_word == "":
+		if err_label: err_label.text = "Username and password cannot be empty!"
+		return
+		
+	if err_label: err_label.text = "Connecting to auth backend..."
+	
+	var api_base = _get_http_api_base()
+	var endpoint = "/api/register" if register else "/api/login"
+	var url = api_base + endpoint
+	
+	var headers = ["Content-Type: application/json"]
+	var body = JSON.stringify({
+		"username": user,
+		"password": pass_word
+	})
+	
+	http_node.cancel_request()
+	var err = http_node.request(url, headers, HTTPClient.METHOD_POST, body)
+	if err != OK:
+		if err_label: err_label.text = "Failed to send request: Code " + str(err)
+
+func _on_guest_pressed():
+	auth_token = ""
+	auth_username = "Guest_" + str(randi() % 1000)
+	is_guest = true
+	user_stats = {"kills": 0, "wins": 0, "played": 0}
+	selected_room_id = ""
+	_show_menu_panel()
+
+func _show_menu_panel():
+	login_panel.visible = false
+	menu_panel.visible = true
+	
+	var profile_lbl = menu_panel.find_child("ProfileLabel")
+	var stats_lbl = menu_panel.find_child("StatsLabel")
+	
+	if profile_lbl:
+		if is_guest:
+			profile_lbl.text = "👤 Welcome, " + auth_username + " (Guest Mode)"
+		else:
+			profile_lbl.text = "🏆 Welcome, " + auth_username + "!"
+			
+	if stats_lbl:
+		if is_guest:
+			stats_lbl.text = "Log in to save kills & wins in the database!"
+		else:
+			stats_lbl.text = "Kills: %d  |  Wins: %d  |  Matches Played: %d" % [user_stats["kills"], user_stats["wins"], user_stats["played"]]
+			
+	_refresh_room_list()
+
+func _refresh_room_list():
+	var api_base = _get_http_api_base()
+	var url = api_base + "/api/rooms"
+	
+	var list_http = HTTPRequest.new()
+	add_child(list_http)
+	list_http.request_completed.connect(func(res, code, hdrs, bdy):
+		if res == HTTPRequest.RESULT_SUCCESS and code == 200:
+			var data_str = bdy.get_string_from_utf8()
+			var rooms_data = JSON.parse_string(data_str)
+			if rooms_data is Array:
+				_populate_room_list(rooms_data)
+		list_http.queue_free()
+	)
+	list_http.request(url, [], HTTPClient.METHOD_GET)
+
+func _populate_room_list(rooms: Array):
+	var list_box = menu_panel.find_child("RoomList")
+	if not list_box: return
+	
+	for child in list_box.get_children():
+		child.queue_free()
+		
+	if rooms.size() == 0:
+		var empty_lbl = Label.new()
+		empty_lbl.text = "No active rooms. Click 'CREATE ROOM' to start one!"
+		empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_lbl.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+		list_box.add_child(empty_lbl)
+		return
+		
+	for room in rooms:
+		if not (room is Dictionary): continue
+		var room_id = room.get("id", "")
+		var count = room.get("player_count", 0)
+		var max_p = room.get("max_players", 4)
+		
+		var hbox = HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 15)
+		list_box.add_child(hbox)
+		
+		var room_lbl = Label.new()
+		room_lbl.text = "🏠 Room ID: %s (%d/%d Players)" % [room_id, count, max_p]
+		room_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hbox.add_child(room_lbl)
+		
+		var join_btn = Button.new()
+		join_btn.text = "JOIN"
+		join_btn.custom_minimum_size = Vector2(80, 26)
+		join_btn.pressed.connect(func():
+			selected_room_id = room_id
+			_on_join_pressed()
+		)
+		hbox.add_child(join_btn)
+
+func _on_create_room_pressed():
+	var api_base = _get_http_api_base()
+	var url = api_base + "/api/rooms"
+	
+	var create_http = HTTPRequest.new()
+	add_child(create_http)
+	create_http.request_completed.connect(func(res, code, hdrs, bdy):
+		if res == HTTPRequest.RESULT_SUCCESS and code == 200:
+			var data_str = bdy.get_string_from_utf8()
+			var data = JSON.parse_string(data_str)
+			if data is Dictionary and data.get("ok") == true:
+				var created_id = data.get("room_id", "")
+				selected_room_id = created_id
+				_on_join_pressed()
+		create_http.queue_free()
+	)
+	create_http.request(url, ["Content-Type: application/json"], HTTPClient.METHOD_POST, "{}")
+
+func _on_hero_class_selected(idx: int):
+	if is_guest or auth_token == "": return
+	var hero_name = "ranger"
+	match idx:
+		1: hero_name = "knight"
+		2: hero_name = "mage"
+		3: hero_name = "assassin"
+		4: hero_name = "sniper"
+		
+	var api_base = _get_http_api_base()
+	var url = api_base + "/api/update_hero"
+	var update_http = HTTPRequest.new()
+	add_child(update_http)
+	update_http.request_completed.connect(func(r, c, h, b): update_http.queue_free())
+	update_http.request(
+		url, 
+		["Content-Type: application/json"], 
+		HTTPClient.METHOD_POST, 
+		JSON.stringify({"token": auth_token, "hero": hero_name})
+	)
+
+func _on_logout_pressed():
+	auth_token = ""
+	auth_username = ""
+	is_guest = true
+	# Delete token file
+	DirAccess.remove_absolute("user://auth_token.txt")
+	
+	menu_panel.visible = false
+	login_panel.visible = true
+	var err_lbl = login_panel.find_child("ErrorLabel")
+	if err_lbl: err_lbl.text = ""
+
+func _on_http_request_completed(result, response_code, headers, body):
+	var err_label = login_panel.find_child("ErrorLabel")
+	if result != HTTPRequest.RESULT_SUCCESS:
+		if err_label: err_label.text = "Connection to auth server failed."
+		return
+		
+	var body_str = body.get_string_from_utf8()
+	var data = JSON.parse_string(body_str)
+	
+	if response_code != 200:
+		var error_msg = "Error (" + str(response_code) + ")"
+		if data is Dictionary and data.has("error"):
+			error_msg = data["error"]
+		if err_label: err_label.text = error_msg
+		return
+		
+	if data is Dictionary and data.get("ok") == true:
+		auth_token = data.get("token", "")
+		auth_username = data.get("username", "")
+		is_guest = false
+		user_stats = {
+			"kills": int(data.get("total_kills", 0)),
+			"wins": int(data.get("total_wins", 0)),
+			"played": int(data.get("games_played", 0))
+		}
+		
+		_save_token(auth_token, auth_username)
+		
+		var hero = data.get("hero", "ranger")
+		var hero_idx = 0
+		match hero:
+			"knight": hero_idx = 1
+			"mage": hero_idx = 2
+			"assassin": hero_idx = 3
+			"sniper": hero_idx = 4
+		if hero_select_btn:
+			hero_select_btn.selected = hero_idx
+			
+		_show_menu_panel()
 
 func _on_join_pressed():
 	if is_connecting or is_connected:
 		return
 		
-	var nickname = $UI/Lobby/Panel/VBox/NameInput.text.strip_edges()
+	var nickname = auth_username
 	if nickname == "":
-		if OS.has_feature("web"):
-			var input = JavaScriptBridge.eval("prompt('请输入你的游戏昵称 (Enter your nickname):', '')")
-			if input != null and str(input).strip_edges() != "":
-				nickname = str(input).strip_edges()
-				$UI/Lobby/Panel/VBox/NameInput.text = nickname
+		nickname = "Guest_" + str(randi() % 1000)
+			
+	var server_url = "ws://localhost:8080/ws"
+	var srv_input = menu_panel.find_child("ServerInput") if menu_panel else null
+	if srv_input and srv_input.text.strip_edges() != "":
+		var final_url = srv_input.text.strip_edges()
+		if not (final_url.begins_with("ws://") or final_url.begins_with("wss://")):
+			final_url = "ws://" + final_url
+		if not final_url.to_lower().ends_with("/ws"):
+			if final_url.ends_with("/"):
+				final_url += "ws"
 			else:
-				nickname = "Archer" + str(randi() % 1000)
-		else:
-			nickname = "Archer" + str(randi() % 1000)
-			
-	var server_url = "ws://prts.kyoiryi.top/archer/ws" # Default production target
-	if OS.has_feature("web"):
-		var host = JavaScriptBridge.eval("window.location.host")
-		var protocol = JavaScriptBridge.eval("window.location.protocol")
-		var pathname = JavaScriptBridge.eval("window.location.pathname")
-		
-		var ws_protocol = "ws://"
-		if protocol == "https:":
-			ws_protocol = "wss://"
-			
-		var ws_path = "/ws"
-		if pathname != null and str(pathname).begins_with("/archer"):
-			ws_path = "/archer/ws"
-			
-		server_url = ws_protocol + host + ws_path
+				final_url += "/ws"
+		server_url = final_url
 	else:
-		# Fallback for local editor / APK development
-		var server_input_text = $UI/Lobby/Panel/VBox/ServerInput.text.strip_edges()
-		if server_input_text != "":
-			var final_url = server_input_text
-			if not (final_url.begins_with("ws://") or final_url.begins_with("wss://")):
-				final_url = "ws://" + final_url
-			
-			# If the input doesn't end with "/ws" (case insensitive), append it
-			var url_lower = final_url.to_lower()
-			if not url_lower.ends_with("/ws"):
-				if url_lower.ends_with("/"):
-					final_url = final_url + "ws"
-				else:
-					final_url = final_url + "/ws"
-			server_url = final_url
-		else:
-			server_url = "wss://prts.kyoiryi.top/archer/ws"
+		server_url = "wss://prts.kyoiryi.top/archer/ws"
 		
-	# Append query param for nickname and hero class selection
 	var selected_hero_idx = hero_select_btn.selected
 	var ws_url = server_url + "?name=" + nickname.uri_encode() + "&hero=" + str(selected_hero_idx)
+	if auth_token != "":
+		ws_url += "&token=" + auth_token.uri_encode()
+	if selected_room_id != "":
+		ws_url += "&room_id=" + selected_room_id.uri_encode()
 	
 	add_chat_message("System", "Connecting to " + ws_url + "...")
 	if status_label:
-		status_label.text = "Connecting to " + ws_url + "..."
-		status_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8)) # grey
+		status_label.text = "Connecting..."
+		status_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 	
-	# Start connection state tracking
 	is_connecting = true
 	connection_timeout_timer = 5.0
-	$UI/Lobby/Panel/VBox/JoinButton.disabled = true
-	$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECTING..."
+	
+	var play_btn = menu_panel.find_child("PlayButton") if menu_panel else null
+	if play_btn:
+		play_btn.disabled = true
+		play_btn.text = "CONNECTING..."
 	
 	socket.connect_to_url(ws_url)
+
+func _reset_join_button_state():
+	if has_node("UI/Lobby/Panel/VBox/JoinButton"):
+		$UI/Lobby/Panel/VBox/JoinButton.disabled = false
+		$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
+	var play_btn = menu_panel.find_child("PlayButton") if menu_panel else null
+	if play_btn:
+		play_btn.disabled = false
+		play_btn.text = "🚀 PLAY (QUICK MATCH)"
+
 
 func _process(delta):
 	# 1. Poll WebSocket
@@ -436,8 +908,7 @@ func _process(delta):
 		if not is_connected:
 			is_connected = true
 			is_connecting = false
-			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
-			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
+			_reset_join_button_state()
 			$UI/Lobby.visible = false
 			$UI/HUD.visible = true
 			add_chat_message("System", "Successfully connected!")
@@ -468,8 +939,7 @@ func _process(delta):
 			add_chat_message("System", "Disconnected from server.")
 		elif is_connecting:
 			is_connecting = false
-			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
-			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
+			_reset_join_button_state()
 			add_chat_message("System", "Connection failed! Server might be offline.")
 			if status_label:
 				status_label.text = "Connection failed!\nEnsure local server is running.\nIf using PC, try entering its IP (e.g. 192.168.x.x:8090)\ninstead of localhost."
@@ -483,8 +953,7 @@ func _process(delta):
 		if connection_timeout_timer <= 0:
 			socket.close()
 			is_connecting = false
-			$UI/Lobby/Panel/VBox/JoinButton.disabled = false
-			$UI/Lobby/Panel/VBox/JoinButton.text = "CONNECT & PLAY"
+			_reset_join_button_state()
 			add_chat_message("System", "Connection timed out.")
 			if status_label:
 				status_label.text = "Connection timed out.\nEnsure address is reachable & server is listening."
