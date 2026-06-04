@@ -19,6 +19,24 @@ echo "Exporting Godot game client to HTML5/WebAssembly..."
 if [ -f "./godot" ]; then
     ./godot --headless --path client --export-release "Web" ../dist/index.html
     echo "Godot web client successfully exported to './dist/'!"
+    
+    # 4. Patch index.html to disable the secure context (HTTPS) check for LAN support
+    echo "Patching 'dist/index.html' to bypass secure context (HTTPS) check for LAN play..."
+    python3 -c "
+with open('dist/index.html', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+target = 'if (missing.length !== 0) {'
+replacement = 'missing = missing.filter(function(x) { return !x.includes(\"Secure Context\"); });\n\tif (missing.length !== 0) {'
+
+if target in content:
+    content = content.replace(target, replacement)
+    with open('dist/index.html', 'w', encoding='utf-8') as f:
+        f.write(content)
+    print('Successfully disabled secure context check!')
+else:
+    print('Warning: target string not found in index.html, skipping patch.')
+"
 else
     echo "Error: Godot executable not found at './godot'."
     exit 1
