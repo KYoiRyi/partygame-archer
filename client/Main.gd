@@ -239,7 +239,8 @@ func _input(event: InputEvent):
 				# Right half: Floating Aim & Manual Shoot
 				var dash_btn = $UI/HUD.get_node_or_null("DashButton")
 				if dash_btn and dash_btn.get_global_rect().has_point(event.position):
-					return # Let the button handle it
+					_on_dash_pressed()
+					return # Prevent aim logic when dashing
 					
 				if not aim_active:
 					aim_active = true
