@@ -1088,8 +1088,8 @@ func (r *Room) damagePlayer(p *Player, dmg float64, attackerID string) {
 				r.triggerLevelUp(att)
 			}
 
-			// End game if score reaches 500 (5 kills)
-			if att.Score >= 500 {
+			// End game if score reaches 10000 (100 kills)
+			if att.Score >= 10000 {
 				r.endGame(att.Name)
 			}
 		}
